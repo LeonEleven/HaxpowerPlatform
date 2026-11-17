@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-11-17T15:43:21+08:00",
+  "platform": "linux/amd64",
+  "compose_project": "haxpower-erpnext-v16-lab",
+  "upstream": {
+    "repository": "https://github.com/frappe/frappe_docker.git",
+    "commit": "0ad1a1152f93b1285104bcd0a8059e036dc5bd3d",
+    "reviewed_files": {
+      "devcontainer-example/docker-compose.yml": "5e0670ba9c342f4fa7def2c44c9da3fa9b6f2dcbc4439d219bd16934417937dd",
+      "devcontainer-example/devcontainer.json": "88e4cb10f1558fc45dc557bd5e1a99954f73610be315b9f89b8e524e6ec8e959",
+      "images/bench/Dockerfile": "75941d20e3e4da4142bdcbb5fa85fb4fa742f42c7bb2e278b8758c659289246b",
+      "docs/05-development/01-development.md": "3bcd914c3ebd513ee7679fff21d58ace6c8bd4acd731b05d4c0fda061208658e"
+    }
+  },
+  "applications": {
+    "frappe": {
+      "repository": "https://github.com/frappe/frappe.git",
+      "tag": "v16.55.0",
+      "commit": "90c8b61afd60ee49f982ca1a9751008e4ae1e24c",
+      "requires_python": ">=3.14,<3.15",
+      "pyproject_sha256": "b7a6046dba3f9294a5600632efb53480ade4d83466ce1e27385ff0aee3dd743a"
+    },
+    "erpnext": {
+      "repository": "https://github.com/frappe/erpnext.git",
+      "tag": "v16.55.0",
+      "commit": "8e10a348daaa93853de8c36dc55ec789a440c219",
+      "requires_python": ">=3.14",
+      "pyproject_sha256": "3bd66bc2d62ad29ed27a7c886140c53964a5618df13ddb57123462f387abf7ea",
+      "requires_frappe": ">=16.55.0,<17.0.0"
+    }
+  },
+  "images": {
+    "bench": {
+      "source_tag": "frappe/bench:latest",
+      "reference": "frappe/bench@sha256:258c5e0d91ebaf83cf314ac6573b1a04a5ce40353a6092bae86550d4299c0782",
+      "image_id": "sha256:258c5e0d91ebaf83cf314ac6573b1a04a5ce40353a6092bae86550d4299c0782",
+      "created": "2026-11-17T06:09:33.084868935Z",
+      "size_bytes": 3789125100
+    },
+    "mariadb": {
+      "source_tag": "mariadb:11.8",
+      "reference": "mariadb@sha256:d36f18d65a0459510b8b0f643b226a6d299e3206486e2b64ff20754a6d291707",
+      "image_id": "sha256:d36f18d65a0459510b8b0f643b226a6d299e3206486e2b64ff20754a6d291707",
+      "created": "2026-11-11T23:30:28.719286167Z",
+      "size_bytes": 465777917
+    },
+    "redis": {
+      "source_tag": "redis:7.4-alpine",
+      "reference": "redis@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe",
+      "image_id": "sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe",
+      "created": "2026-11-09T20:09:32.419853068Z",
+      "size_bytes": 57976413
+    }
+  }
+}
