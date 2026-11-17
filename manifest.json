@@ -1,0 +1,21 @@
+{
+  "project": "HaxpowerPlatform",
+  "document_version": "0.1.0",
+  "date": "2026-11-16",
+  "status": "requirements and architecture design; technology route not finalized",
+  "documents": [
+    "AGENTS.md",
+    "README.md",
+    "docs/API-CONTRACTS.md",
+    "docs/BUSINESS-FLOWS.md",
+    "docs/DATABASE-DESIGN.md",
+    "docs/DECISIONS.md",
+    "docs/DEVELOPMENT-PLAN.md",
+    "docs/ERPNext-FIT-GAP.md",
+    "docs/INVENTORY-MODEL.md",
+    "docs/PERMISSIONS.md",
+    "docs/PRD.md",
+    "docs/PRODUCT-MODEL.md",
+    "docs/TECHNICAL-DESIGN.md"
+  ]
+}
