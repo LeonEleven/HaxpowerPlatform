@@ -115,6 +115,8 @@ Frappe 必须为 `90c8b61afd60ee49f982ca1a9751008e4ae1e24c`，ERPNext 必须为 
 
 ## 安全交互创建测试站点
 
+本机 `haxpower.localhost` 已由用户完成交互创建并安装ERPNext，完整站点验证已通过；以下命令仅供重建全新环境，不要对当前站点重复执行。
+
 站点创建会初始化应用数据库，并询问数据库 root 密码和 Administrator 密码；需由用户在自己的安全交互式终端执行。不得把密码发送到聊天中、放入命令参数、通过 tee 记录或开启终端录制。数据库 root 密码保存在宿主实验 `secrets/mariadb-root-password` 文件；只在本地安全查看并输入隐藏提示，管理员密码由用户设置并保存。
 
 从 Ubuntu WSL 终端执行以下**单次**命令，在创建站点时同时安装已获取的 ERPNext：
@@ -132,5 +134,9 @@ bench start
 ```
 
 Bench 启动后，Windows VSCode 从 WSL 打开实验目录，选择 Reopen in Container，在“端口”面板确认8000/9000/6787仅转发至localhost；浏览器访问 `http://haxpower.localhost:8000`。若该域名无法解析，可访问 `http://localhost:8000` 并依赖已设置的默认站点；如仍失败，核查本地转发与Host路由，不修改全局DNS。终端中的 `bench start` 持续运行，关闭该终端会停止开发进程；关闭 Dev Container 窗口也可能停止四个基础服务。
+
+当前已有一组Bench开发进程在frappe容器内运行，不要另开第二组；脱敏日志为 `workspace/frappe-bench/logs/lab-start-20261117T090436Z.log`（相对实验根目录）。此处是临时开发进程，Compose不会自动启动它；容器重启后需在Bench目录重新运行 `bench start`。本次已验证容器内HTTP及两个Host路由，但未自动操作Windows VSCode GUI；主机浏览器需要先建立上述端口转发。
+
+新站点scheduler仍为disabled/inactive，worker在线数为1。启用定时任务和完成Setup Wizard需在后续任务中明确安排，不通过修改全局配置或引入真实公司数据完成本轮验收。
 
 创建独立 `haxpower_platform` App、业务数据表或验证数据属于后续任务。安装期间产生的站点配置、源码、依赖、上传文件及数据库都留在实验环境；提交到本仓库前仅提取脱敏证据和经过审阅的自定义资源，不复制整个 Bench。

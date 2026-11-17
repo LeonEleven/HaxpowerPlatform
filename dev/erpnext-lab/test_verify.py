@@ -7,11 +7,12 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
 import verify
-from site_checks import TOOLS_CHECK
+from site_checks import TOOLS_CHECK, SITE_CHECK
 
 
 class VerificationSafetyTests(unittest.TestCase):
@@ -91,6 +92,31 @@ class VerificationSafetyTests(unittest.TestCase):
              contextlib.redirect_stdout(captured):
             exec(TOOLS_CHECK, {})
         self.assertTrue(json.loads(captured.getvalue())['bench_workspace_exists'])
+
+    def test_site_initialization_runs_from_sites_directory(self):
+        """Frappe creates ../logs relative to sites, even with an absolute sites_path."""
+        database = mock.Mock()
+        database.sql.return_value = [(1,)]
+        database.exists.return_value = True
+        frappe = SimpleNamespace(
+            init=mock.Mock(), connect=mock.Mock(), destroy=mock.Mock(), db=database,
+            get_installed_apps=mock.Mock(return_value=['frappe', 'erpnext']),
+            conf={'redis_cache': 'redis://redis-cache:6379', 'redis_queue': 'redis://redis-queue:6379'},
+        )
+        redis = mock.Mock()
+        redis.from_url.return_value.ping.return_value = True
+        captured = io.StringIO()
+        with mock.patch.dict(sys.modules, {'frappe': frappe, 'redis': SimpleNamespace(Redis=redis)}), \
+             mock.patch('pathlib.Path.is_dir', return_value=True), \
+             mock.patch('pathlib.Path.stat', return_value=SimpleNamespace(st_uid=1000)), \
+             mock.patch('os.chdir') as chdir, contextlib.redirect_stdout(captured):
+            def initialize(**kwargs):
+                chdir.assert_called_once_with(Path('/workspace/development/frappe-bench/sites'))
+                self.assertEqual(kwargs['sites_path'], '.')
+            frappe.init.side_effect = initialize
+            exec(SITE_CHECK, {})
+        self.assertTrue(json.loads(captured.getvalue())['database_connected'])
+        frappe.destroy.assert_called_once_with()
 
 
 if __name__ == '__main__':

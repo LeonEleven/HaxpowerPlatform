@@ -86,14 +86,15 @@ print(json.dumps(result))
 """
 
 SITE_CHECK = """
-import json, pathlib
+import json, os, pathlib
 import frappe
 from redis import Redis
 root = pathlib.Path('/workspace/development/frappe-bench')
 site = root/'sites'/'haxpower.localhost'
 if not site.is_dir() or site.stat().st_uid != 1000:
     raise RuntimeError('Test site missing or owned by unexpected user')
-frappe.init(site='haxpower.localhost', sites_path=str(root/'sites'))
+os.chdir(root/'sites')
+frappe.init(site='haxpower.localhost', sites_path='.')
 try:
     frappe.connect()
     apps = frappe.get_installed_apps()
