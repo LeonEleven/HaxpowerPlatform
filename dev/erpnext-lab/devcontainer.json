@@ -1,0 +1,27 @@
+{
+  "name": "Haxpower ERPNext v16 lab",
+  "dockerComposeFile": "../compose.yaml",
+  "service": "frappe",
+  "runServices": ["mariadb", "redis-cache", "redis-queue", "frappe"],
+  "workspaceFolder": "/workspace/development",
+  "remoteUser": "frappe",
+  "updateRemoteUserUID": false,
+  "overrideCommand": false,
+  "shutdownAction": "stopCompose",
+  "forwardPorts": [8000, 9000, 6787],
+  "portsAttributes": {
+    "8000": {"label": "Frappe web", "onAutoForward": "notify"},
+    "9000": {"label": "Frappe realtime", "onAutoForward": "silent"},
+    "6787": {"label": "Frappe asset watcher", "onAutoForward": "silent"}
+  },
+  "otherPortsAttributes": {"onAutoForward": "ignore"},
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "remote.localPortHost": "localhost",
+        "remote.autoForwardPorts": false,
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  }
+}
