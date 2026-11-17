@@ -1,8 +1,8 @@
 # ERPNext v16 独立验证环境
 
-只提供 Stage 0 基础服务，不自动创建 Bench、ERPNext 站点、自定义 App 或业务数据。
+提供 Stage 0 基础环境及分阶段验证工具。配置生成器不会创建 Bench、站点或业务数据；Bench/ERPNext 安装需按后续明确授权的任务执行。
 
-环境实测和已知限制见 [搭建报告](../../docs/STAGE0-BOOTSTRAP-REPORT.md)，业务用例见 [验证计划](../../docs/ERPNext-VALIDATION-PLAN.md)。
+基础环境实测见 [搭建报告](../../docs/STAGE0-BOOTSTRAP-REPORT.md)，应用与站点进展见 [安装报告](../../docs/STAGE0-ERPNEXT-INSTALL-REPORT.md)，业务用例见 [验证计划](../../docs/ERPNext-VALIDATION-PLAN.md)。
 
 ## 文件与隔离布局
 
@@ -10,7 +10,9 @@
 - `devcontainer.json`：可使用相同 Compose 的 VSCode Dev Containers 配置，无 SSH 挂载或自动安装命令。
 - `versions.lock.json`：上游和目标应用 Commit、依赖声明及三个镜像的完整 Digest；镜像固定 linux/amd64。
 - `prepare.py`：只生成本地配置和随机密码；不下载、安装或运行 Docker/Bench。
-- `verify.py`：检查安全配置、镜像一致性、健康状态、连接、工具、依赖源和日志；不安装包或创建站点。
+- `verify.py`：统一检查入口，提供 base、bench、site 三个阶段；不安装包或创建站点。
+- `site_checks.py`：独立的开发工具、Bench、应用和站点检查；不输出站点配置或密码。
+- `test_verify.py`：无 Docker 的安全与兼容性回归测试，可在 Python 优化模式下运行。
 
 ```text
 ~/labs/haxpower-erpnext-v16/            # 不在 HaxpowerPlatform 仓库内
@@ -36,10 +38,21 @@ python3 dev/erpnext-lab/prepare.py --lab-root "$HAXPOWER_LAB_ROOT"
 python3 dev/erpnext-lab/verify.py --lab-root "$HAXPOWER_LAB_ROOT" --config-only
 docker compose --project-directory "$HAXPOWER_LAB_ROOT" -f "$HAXPOWER_LAB_ROOT/compose.yaml" pull
 docker compose --project-directory "$HAXPOWER_LAB_ROOT" -f "$HAXPOWER_LAB_ROOT/compose.yaml" up -d --wait --wait-timeout 180
-python3 dev/erpnext-lab/verify.py --lab-root "$HAXPOWER_LAB_ROOT" --output "$HAXPOWER_LAB_ROOT/bootstrap-checks.json"
+python3 dev/erpnext-lab/verify.py --lab-root "$HAXPOWER_LAB_ROOT" --phase base --output "$HAXPOWER_LAB_ROOT/new-base-checks.json"
 ```
 
-必须等待 `up --wait` 成功结束再执行运行检查；启动期间的 `starting` 不能算健康。检查脚本是本阶段基线检查，明确要求工作区尚无 `frappe-bench`；下一阶段创建 Bench 后需调整检查范围，不能沿用它宣称本站点业务通过。
+必须等待 `up --wait` 成功结束再执行运行检查；启动期间的 `starting` 不能算健康。`base` 只验证基础服务，允许 Bench 已存在；`bench` 加查虚拟环境、两应用版本/Commit、核心源码干净状态及服务配置；`site` 再加查站点数据库、Redis、Administrator、网页和 API。`--config-only` 仅检查配置，结果明确标记为配置检查，不能作为站点通过证据。
+
+每次 `--output` 使用新文件名：脚本拒绝覆盖任何已有证据，尤其是历史 `bootstrap-checks.json`。关键安全校验使用明确异常处理，不受 `python -O` 影响。检查站点时也不输出 site_config.json，自动遮盖已知数据库密码及加密密钥。
+
+安装应用后和站点启动后的检查示例（分别运行，不用较低阶段替代失败的站点检查）：
+
+```bash
+python3 dev/erpnext-lab/verify.py --phase bench --output "$HOME/labs/haxpower-erpnext-v16/new-bench-checks.json"
+python3 dev/erpnext-lab/verify.py --phase site --output "$HOME/labs/haxpower-erpnext-v16/new-site-checks.json"
+python3 -m unittest discover -s dev/erpnext-lab -p test_verify.py -v
+python3 -O -m unittest discover -s dev/erpnext-lab -p test_verify.py -v
+```
 
 镜像均从锁定 Digest 拉取，不会因 `latest`、`11.8` 或 `7.4-alpine` 标签变化而漂移。若旧 Digest 不再可用，应先记录并评审新版本，不自动退回浮动标签。该锁定覆盖基础环境；未来 Bench 应用的完整 Python/Node 依赖锁定仍需在安装阶段补齐。
 
@@ -78,13 +91,13 @@ docker compose --project-directory "$HOME/labs/haxpower-erpnext-v16" -f "$HOME/l
 
 不运行 prune 或 `down -v`。更新配置时先检查差异与持久化影响，不通过删卷解决连接、权限或启动问题。`prepare.py` 内容不一致就停止，需要人工审阅后才更新实验副本。
 
-## 下一阶段手动步骤（本次不执行）
+## Bench 与应用安装步骤
 
 在审查通过并获得后续建站任务后，于开发容器以 `frappe` 用户执行。先复核锁定 tag 对应的 Commit 和 `bench ... --help`，确认 Python 3.14.10、Node 24 的实际版本，再依次进行：
 
 ```bash
 cd /workspace/development
-bench init --frappe-path https://github.com/frappe/frappe.git --frappe-branch v16.55.0 --python /home/frappe/.pyenv/versions/3.14.10/bin/python --skip-redis-config-generation frappe-bench
+bench init --frappe-path https://github.com/frappe/frappe.git --frappe-branch v16.55.0 --python /home/frappe/.pyenv/versions/3.14.10/bin/python --skip-redis-config-generation --no-backups frappe-bench
 cd frappe-bench
 git -C apps/frappe rev-parse HEAD
 bench set-config -g db_host mariadb
@@ -98,16 +111,26 @@ git -C apps/erpnext rev-parse HEAD
 
 Frappe 必须为 `90c8b61afd60ee49f982ca1a9751008e4ae1e24c`，ERPNext 必须为 `8e10a348daaa93853de8c36dc55ec789a440c219`。如果 tag 改指向其他提交，停止并调查，不默默接受。
 
-之后再创建站点（会初始化应用数据库）：
+`--no-backups` 避免初始化期间配置容器内定时备份；测试数据备份与恢复另行设计。不要重复对已有 Bench 运行 init，不使用 overwrite 或删除目录来重试失败安装。
+
+## 安全交互创建测试站点
+
+站点创建会初始化应用数据库，并询问数据库 root 密码和 Administrator 密码；需由用户在自己的安全交互式终端执行。不得把密码发送到聊天中、放入命令参数、通过 tee 记录或开启终端录制。数据库 root 密码保存在宿主实验 `secrets/mariadb-root-password` 文件；只在本地安全查看并输入隐藏提示，管理员密码由用户设置并保存。
+
+从 Ubuntu WSL 终端执行以下**单次**命令，在创建站点时同时安装已获取的 ERPNext：
 
 ```bash
-bench new-site --db-type mariadb --db-host mariadb --mariadb-user-host-login-scope=% haxpower.localhost
-bench --site haxpower.localhost install-app erpnext
+docker compose --project-directory "$HOME/labs/haxpower-erpnext-v16" -f "$HOME/labs/haxpower-erpnext-v16/compose.yaml" exec --workdir /workspace/development/frappe-bench frappe bench new-site --db-type mariadb --db-host mariadb --mariadb-user-host-login-scope=% --install-app erpnext --set-default haxpower.localhost
+```
+
+若已有站点或命令失败，先停止并检查当前状态，不重复建站、force、删库或删卷。确认创建和安装成功后，在开发容器 Bench 目录检查并启动：
+
+```bash
 bench --site haxpower.localhost list-apps
 bench use haxpower.localhost
 bench start
 ```
 
-新站点命令交互询问数据库 root 密码与站点管理员密码；通过本地安全渠道输入，不把密码写入命令参数。浏览器经 localhost 转发访问 `http://haxpower.localhost:8000`；如解析失败，先核查本地转发与 Host 路由，不擅自修改全局 DNS。
+Bench 启动后，Windows VSCode 从 WSL 打开实验目录，选择 Reopen in Container，在“端口”面板确认8000/9000/6787仅转发至localhost；浏览器访问 `http://haxpower.localhost:8000`。若该域名无法解析，可访问 `http://localhost:8000` 并依赖已设置的默认站点；如仍失败，核查本地转发与Host路由，不修改全局DNS。终端中的 `bench start` 持续运行，关闭该终端会停止开发进程；关闭 Dev Container 窗口也可能停止四个基础服务。
 
 创建独立 `haxpower_platform` App、业务数据表或验证数据属于后续任务。安装期间产生的站点配置、源码、依赖、上传文件及数据库都留在实验环境；提交到本仓库前仅提取脱敏证据和经过审阅的自定义资源，不复制整个 Bench。
