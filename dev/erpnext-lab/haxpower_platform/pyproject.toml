@@ -1,0 +1,9 @@
+[project]
+name = "haxpower_platform"
+version = "0.1.0"
+description = "HaxpowerPlatform Stage 1B inventory experiment"
+requires-python = ">=3.14,<3.15"
+
+[build-system]
+requires = ["flit_core>=3.4,<4"]
+build-backend = "flit_core.buildapi"
