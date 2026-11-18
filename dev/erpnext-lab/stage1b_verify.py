@@ -44,7 +44,7 @@ def new_connection():
             "Prototype not ready")
 
 
-def session(user, roles):
+def session(user, roles, locations):
     if not frappe.db.exists("User", user):
         doc = frappe.get_doc({
             "doctype": "User", "email": user, "first_name": "Stage 1B fictitious user",
@@ -58,6 +58,15 @@ def session(user, roles):
         doc = frappe.get_doc("User", user)
         doc.append_roles(*sorted(missing))
         doc.save()
+    allowed = {LOCATIONS[location] for location in locations}
+    filters = {"user": user, "allow": "Warehouse"}
+    grants = frappe.get_all("User Permission", filters=filters,
+                            fields=["for_value", "apply_to_all_doctypes"])
+    require(all(grant.for_value in allowed and grant.apply_to_all_doctypes for grant in grants),
+            "Unexpected Warehouse grant on the test user")
+    for warehouse in sorted(allowed - {grant.for_value for grant in grants}):
+        frappe.get_doc({"doctype": "User Permission", **filters, "for_value": warehouse,
+                        "apply_to_all_doctypes": 1, "hide_descendants": 1}).insert()
     keys = generate_keys(user)
     frappe.db.commit()
     client = requests.Session()
@@ -249,8 +258,8 @@ def main():
     require(not frappe.db.get_value("Company", COMPANY, "enable_perpetual_inventory"), "Wrong costing")
     require(not frappe.db.get_single_value("Stock Settings", "auto_create_serial_and_batch_bundle_for_outward"),
             "Wrong allocation configuration")
-    operator = session(OPERATOR, [ROLE])
-    stock_user = session(STOCK_USER, [ROLE, "Stock User", "Stock Manager", "Item Manager"])
+    operator = session(OPERATOR, [ROLE], tuple(LOCATIONS))
+    stock_user = session(STOCK_USER, [ROLE, "Stock User", "Stock Manager", "Item Manager"], ("W1/L1",))
     std61 = {"mode": "BATCH", "batchNo": "STD61"}
     std62 = {"mode": "BATCH", "batchNo": "STD62"}
     commands = [

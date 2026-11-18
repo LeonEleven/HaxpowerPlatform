@@ -1,4 +1,4 @@
-"""Minimal adapter for the isolated Stage 1B stock fixtures."""
+"""Minimal adapter for the isolated inventory experiments."""
 
 import json
 import re
@@ -14,6 +14,7 @@ from erpnext.stock.doctype.serial_and_batch_bundle.serial_and_batch_bundle impor
 SITE = "haxpower-stage1b.localhost"
 COMPANY = "HP Stage 1B Lab"
 ROLE = "Haxpower Stage 1B Operator"
+QUERY_ROLE = "Haxpower Stage 1C Query"
 ITEMS = {"SKU-A": "HP1B-SKU-A", "SKU-B": "HP1B-SKU-B"}
 LOCATIONS = {"W1/L1": "HP1B L1 - H1B", "W1/L2": "HP1B L2 - H1B"}
 SYSTEM_DESCRIPTION = "Haxpower internal no-batch bucket"
@@ -49,23 +50,29 @@ def protect_batch(doc, method=None, *args, **kwargs):
 def protect_inventory(doc, method=None):
     if frappe.local.site != SITE or SERVICE_WRITE.get():
         return
-    items = [row.item_code for row in doc.get("items", [])]
-    if doc.get("item_code") in ITEMS.values() or any(item in ITEMS.values() for item in items):
-        frappe.throw("STAGE1B_USE_ADAPTER", frappe.PermissionError)
+    for version in (doc, doc.get_doc_before_save()):
+        if version and (version.get("item_code") in ITEMS.values()
+                        or any(row.item_code in ITEMS.values() for row in version.get("items", []))):
+            frappe.throw("STAGE1B_USE_ADAPTER", frappe.PermissionError)
 
 
-def fixture_scope(stock_item_id, warehouse_location_id):
+def fixture_scope(stock_item_id, warehouse_location_id, *, write=False):
     if frappe.local.site != SITE or frappe.conf.db_name != "haxpower_stage1b_lab":
         frappe.throw("STAGE1B_SITE_REQUIRED", frappe.PermissionError)
-    frappe.only_for(ROLE)
-    item = ITEMS.get(stock_item_id)
-    warehouse = LOCATIONS.get(warehouse_location_id)
-    if not item:
-        frappe.throw("PRODUCT_NOT_FOUND")
+    allowed_roles = {ROLE} if write else {ROLE, QUERY_ROLE}
+    if allowed_roles.isdisjoint(frappe.get_roles()):
+        frappe.throw("INVENTORY_OPERATION_DENIED", frappe.PermissionError)
+    warehouse = LOCATIONS.get(warehouse_location_id) if isinstance(warehouse_location_id, str) else None
     if not warehouse or not frappe.db.exists(
         "Warehouse", {"name": warehouse, "company": COMPANY, "is_group": 0, "disabled": 0}
+    ) or not frappe.db.exists(
+        "User Permission", {"user": frappe.session.user, "allow": "Warehouse",
+                            "for_value": warehouse, "apply_to_all_doctypes": 1}
     ):
         frappe.throw("WAREHOUSE_ACCESS_DENIED", frappe.PermissionError)
+    item = ITEMS.get(stock_item_id) if isinstance(stock_item_id, str) else None
+    if not item:
+        frappe.throw("PRODUCT_NOT_FOUND")
     return item, warehouse
 
 
@@ -136,7 +143,7 @@ def post_entry(action, item, warehouse, qty, key, remarks):
 
 @frappe.whitelist(methods=["POST"])
 def post_stock(action, stockItemId, warehouseLocationId, quantity, requestId, batchSelection=None):
-    item, warehouse = fixture_scope(stockItemId, warehouseLocationId)
+    item, warehouse = fixture_scope(stockItemId, warehouseLocationId, write=True)
     number = parse_selection(batchSelection)
     if action not in ("RECEIPT", "ISSUE"):
         frappe.throw("INVALID_STOCK_ACTION")
