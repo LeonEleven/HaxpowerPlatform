@@ -44,7 +44,7 @@ def new_connection():
             "Prototype not ready")
 
 
-def session(user, roles, locations):
+def session(user, roles, locations, *, warehouse_locations=LOCATIONS):
     if not frappe.db.exists("User", user):
         doc = frappe.get_doc({
             "doctype": "User", "email": user, "first_name": "Stage 1B fictitious user",
@@ -58,7 +58,7 @@ def session(user, roles, locations):
         doc = frappe.get_doc("User", user)
         doc.append_roles(*sorted(missing))
         doc.save()
-    allowed = {LOCATIONS[location] for location in locations}
+    allowed = {warehouse_locations[location] for location in locations}
     filters = {"user": user, "allow": "Warehouse"}
     grants = frappe.get_all("User Permission", filters=filters,
                             fields=["for_value", "apply_to_all_doctypes"])
@@ -252,7 +252,7 @@ def native_access(client, key, bundle, dates):
     return outcomes
 
 
-def main():
+def main(emit=print):
     require(Path.cwd() == ROOT, "Wrong Bench directory")
     new_connection()
     require(not frappe.db.get_value("Company", COMPANY, "enable_perpetual_inventory"), "Wrong costing")
@@ -326,7 +326,7 @@ def main():
             or (table_name = 'tabSerial and Batch Entry' and column_name = 'qty')
             or (table_name = 'tabBin' and column_name = 'actual_qty'))
     """)
-    print(json.dumps({"commands": results, "replay": replay, "rejected": rejections, "access": access,
+    emit(json.dumps({"commands": results, "replay": replay, "rejected": rejections, "access": access,
                       "same_inventory_after_rejections": True, "fresh_initial_run": fresh,
                       "quantity_column_types": column_types, "committed": after},
                      ensure_ascii=False, default=str, indent=2))

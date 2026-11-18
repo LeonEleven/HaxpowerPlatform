@@ -36,8 +36,9 @@ SNAPSHOT_TABLES = (
 )
 
 
-def fingerprint():
-    frappe.db.rollback()
+def fingerprint(*, fresh=True):
+    if fresh:
+        frappe.db.rollback()
     result = {}
     for doctype in SNAPSHOT_TABLES:
         rows = frappe.get_all(doctype, fields=["*"], order_by="name")
@@ -304,7 +305,7 @@ def successful_rollback(original):
     return posted
 
 
-def main():
+def main(emit=print):
     require(Path.cwd() == ROOT, "Wrong Bench directory")
     new_connection()
     state = committed_snapshot()
@@ -322,7 +323,7 @@ def main():
         require(after == original, "Stage 1B state changed after the permission matrix")
         require(grants_snapshot() == initial_grants, "Denied requests changed grants")
         require(committed_snapshot() == state, "Committed inventory changed")
-        print(json.dumps({
+        emit(json.dumps({
             "site": SITE, "started_at": started_at, "profiles": profiles, "before": original, "after": after,
             "custom": custom, "native": native, "rolled_back_documents": rolled_back,
             "warehouse_grants_unchanged": True,

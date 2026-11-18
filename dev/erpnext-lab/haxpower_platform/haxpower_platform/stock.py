@@ -10,6 +10,7 @@ from uuid import NAMESPACE_URL, uuid5
 import frappe
 from erpnext.stock.doctype.serial_and_batch_bundle.serial_and_batch_bundle import get_batch_qty_for_stock
 
+from haxpower_platform import transit_fixtures
 
 SITE = "haxpower-stage1b.localhost"
 COMPANY = "HP Stage 1B Lab"
@@ -21,15 +22,20 @@ SYSTEM_DESCRIPTION = "Haxpower internal no-batch bucket"
 INTERNAL_PREFIX = "HP-NB-"
 REAL_PREFIX = "HP-RB-"
 SERVICE_WRITE = ContextVar("stage1b_service_write", default=False)
+MANAGED_ITEMS = frozenset((*ITEMS.values(), *transit_fixtures.ITEMS.values()))
 
 
 class BundlePermissionMixin:
     def has_permission(self, permtype="read", *, debug=False, user=None):
         # ERPNext creates and submits a separate Bundle document during posting.
-        if (frappe.local.site == SITE and self.item_code in ITEMS.values()
+        if (frappe.local.site == SITE and self.item_code in MANAGED_ITEMS
                 and permtype in ("create", "write", "submit", "cancel", "delete", "amend")):
-            return (SERVICE_WRITE.get() and self.company == COMPANY and self.warehouse in LOCATIONS.values()
-                    and permtype in ("create", "write", "submit"))
+            stage1b = (self.company == COMPANY and self.item_code in ITEMS.values()
+                       and self.warehouse in LOCATIONS.values())
+            stage1d = (self.company == transit_fixtures.COMPANY
+                       and self.item_code in transit_fixtures.ITEMS.values()
+                       and self.warehouse in (*transit_fixtures.LOCATIONS.values(), transit_fixtures.TRANSIT))
+            return SERVICE_WRITE.get() and (stage1b or stage1d) and permtype in ("create", "write", "submit")
         return super().has_permission(permtype, debug=debug, user=user)
 
 
@@ -41,7 +47,7 @@ def protect_batch(doc, method=None, *args, **kwargs):
     if frappe.local.site != SITE or SERVICE_WRITE.get():
         return
     before = doc.get_doc_before_save() if method == "before_validate" else None
-    if doc.item in ITEMS.values() or (before and before.item in ITEMS.values()) or any(
+    if doc.item in MANAGED_ITEMS or (before and before.item in MANAGED_ITEMS) or any(
         reserved(value) for value in (doc.name, doc.batch_id, *args)
     ):
         frappe.throw("STAGE1B_BATCH_PROTECTED", frappe.PermissionError)
@@ -51,25 +57,31 @@ def protect_inventory(doc, method=None):
     if frappe.local.site != SITE or SERVICE_WRITE.get():
         return
     for version in (doc, doc.get_doc_before_save()):
-        if version and (version.get("item_code") in ITEMS.values()
-                        or any(row.item_code in ITEMS.values() for row in version.get("items", []))):
+        if version and (version.get("item_code") in MANAGED_ITEMS
+                        or any(row.item_code in MANAGED_ITEMS for row in (version.get("items") or ()))):
             frappe.throw("STAGE1B_USE_ADAPTER", frappe.PermissionError)
 
 
-def fixture_scope(stock_item_id, warehouse_location_id, *, write=False):
+def require_site():
     if frappe.local.site != SITE or frappe.conf.db_name != "haxpower_stage1b_lab":
         frappe.throw("STAGE1B_SITE_REQUIRED", frappe.PermissionError)
-    allowed_roles = {ROLE} if write else {ROLE, QUERY_ROLE}
-    if allowed_roles.isdisjoint(frappe.get_roles()):
-        frappe.throw("INVENTORY_OPERATION_DENIED", frappe.PermissionError)
-    warehouse = LOCATIONS.get(warehouse_location_id) if isinstance(warehouse_location_id, str) else None
-    if not warehouse or not frappe.db.exists(
-        "Warehouse", {"name": warehouse, "company": COMPANY, "is_group": 0, "disabled": 0}
-    ) or not frappe.db.exists(
+def require_warehouse(warehouse, company):
+    location = frappe.db.get_value("Warehouse", {"name": warehouse, "company": company, "is_group": 0,
+                                                 "disabled": 0}, "warehouse_type", as_dict=True) if warehouse else None
+    if not location or location.warehouse_type == "Transit" or not frappe.db.exists(
         "User Permission", {"user": frappe.session.user, "allow": "Warehouse",
                             "for_value": warehouse, "apply_to_all_doctypes": 1}
     ):
         frappe.throw("WAREHOUSE_ACCESS_DENIED", frappe.PermissionError)
+
+
+def fixture_scope(stock_item_id, warehouse_location_id, *, write=False):
+    require_site()
+    allowed_roles = {ROLE} if write else {ROLE, QUERY_ROLE}
+    if allowed_roles.isdisjoint(frappe.get_roles()):
+        frappe.throw("INVENTORY_OPERATION_DENIED", frappe.PermissionError)
+    warehouse = LOCATIONS.get(warehouse_location_id) if isinstance(warehouse_location_id, str) else None
+    require_warehouse(warehouse, COMPANY)
     item = ITEMS.get(stock_item_id) if isinstance(stock_item_id, str) else None
     if not item:
         frappe.throw("PRODUCT_NOT_FOUND")
