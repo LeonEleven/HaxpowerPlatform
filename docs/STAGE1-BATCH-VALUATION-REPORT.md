@@ -1,8 +1,8 @@
 # Stage 1 — ERPNext 原生批次与库存估值验证
 
-2026-11-18（Asia/Shanghai）进行技术可行性验证。**库存实测阻塞，等待用户完成 Setup Wizard。**
+2026-11-18（Asia/Shanghai）完成本轮技术可行性验证。**ERPNext 原生批次行为未满足同一 SKU 的无批次库存及显式选择要求。** 关闭永续盘存的隔离公司可以使用零金额的库存入库和出库，且本轮未产生 GL Entry。非零对照证明库存流水仍维护估值。每 SKU 一个内部 NO_BATCH Batch 的方案待验证。
 
-`haxpower.localhost` 的 Frappe 与 ERPNext 初始化标志均为 `0`，数据库中没有 Company。此次执行了只读环境与数据基线检查，未创建测试档案、库存单据、Bundle 或系统 Batch。源码分析用于定位恢复后的测试路径，原生用例均按阻塞记录。
+首次检查时 `haxpower.localhost` 的两应用初始化标志均为 `0`，因此暂停库存写入。用户完成 Setup Wizard 后，两标志均为 `1`，时区为 Asia/Shanghai，检查范围内没有原有库存或财务交易。随后使用真实的 Document API `insert()` 和 `submit()` 执行测试，在同一数据库事务中读取证据并最终回滚所有测试档案、单据和临时配置。
 
 ## 1. 环境、配置与数据基线
 
@@ -17,42 +17,43 @@ GitHub 已确认 PR #1–#4 均合并至 `main`。开始时工作区及暂存区
 | 运行时 | Bench venv Python 3.14.10，MariaDB `11.8.9-MariaDB-ubu2404`，两个 Redis 均为 7.4.12 |
 | 容器 | `frappe`、`mariadb`、`redis-cache`、`redis-queue` 均 running / healthy，实际镜像引用与锁文件一致 |
 | Bench | 同一组 Honcho（PID 7140），一个在线 worker。`bench doctor` 显示站点 scheduler disabled / inactive，站点任务列表无条目。沿用现有进程 |
-| 向导 | `frappe.is_setup_complete() == False`，两条 `Installed Application.is_setup_complete` 均为 0，`System Settings.time_zone` 为空 |
+| 向导 | 恢复时 `frappe.is_setup_complete() == True`，两条 `Installed Application.is_setup_complete` 均为 1，`System Settings.time_zone=Asia/Shanghai` |
 | 审批和负库存 | 没有 Stock Entry 活动 Workflow，`allow_negative_stock=0` |
 | 批次设置 | `enable_serial_and_batch_no_for_item=0`，`use_serial_batch_fields=1`，`auto_create_serial_and_batch_bundle_for_outward=1`，拣选策略 `FIFO`，命名序列前缀 `BATCH-` |
-| 估值与会计 | 没有 Company，可用的公司估值方法、永续盘存开关和默认科目尚无实测值 |
+| 估值与会计 | 向导公司使用 CNY、FIFO 和永续盘存。测试使用四个新建虚构公司，两种估值对照公司的永续盘存分别为 0 和 1 |
 
-上述 Stock Settings 来自向导完成前，应在向导后重新读取。所用镜像见 [实验版本锁文件](../dev/erpnext-lab/versions.lock.json)。
+脚本仅在实验事务内打开批次功能，并对照测试关闭和开启自动出库分配。原有公司的会计配置不参与提交。所用镜像见 [实验版本锁文件](../dev/erpnext-lab/versions.lock.json)。
 
 通过 `frappe.get_all`、`frappe.db.count` 和 `frappe.db.get_single_value` 读取元数据、计数与设置。已检查的数据范围内未发现不明来源业务记录。
 
-| 检查范围 | 基线与复查 |
+| 检查范围 | 向导完成后基线与实验回滚后 |
 | --- | --- |
-| Company、Warehouse、Item、Batch、Bin、Brand、UOM、Account、Cost Center、Workflow | 各 0 |
+| Company、Warehouse、Account、Cost Center、UOM、Item Group | 分别为 1、5、95、2、239、6 |
+| Item、Item Price、Batch、Bin、Brand、Workflow | 各 0 |
 | Stock Entry、Stock Reconciliation、Stock Ledger Entry、Serial and Batch Bundle、Serial and Batch Entry | 各 0 |
 | GL Entry、Repost Item Valuation | 各 0 |
-| Purchase Order、Sales Order、Purchase Invoice、Sales Invoice、Purchase Receipt、Delivery Note | 各 0 |
+| Purchase Order、Sales Order、Purchase Invoice、Sales Invoice、Purchase Receipt、Delivery Note、Journal Entry、Payment Entry | 各 0 |
 
 ## 2. E01、E02、E04、E05 执行结果
 
-计划数据为虚构 SKU-A（喷油嘴，品牌甲），单位 PC，整数数量。W1/L1 的目标为 STD61 12、STD62 20、无批次 15。验证计划还要求 W1/L2 独立测试无批次 12。库存单据拟使用 `frappe.get_doc({...}).insert()` 与 `doc.submit()`，真实批次由标准 Batch DocType 建档并通过单据批次字段或 Bundle 分配。各组提交前后均须留存独立快照。 [用例与通过标准](ERPNext-VALIDATION-PLAN.md) · [Frappe Document API](https://docs.frappe.io/framework/user/en/api/document)
+最终实验编号 `HP-S1-19D9916B3B`，于 11:07:09（Asia/Shanghai）开始。虚构 SKU-A 是品牌甲喷油嘴，使用仅允许整数的 PC。通过标准 Item、Batch 和 Stock Entry DocType 建档和提交。STD61 与 STD62 为报告中的显示简写，原生 Batch ID 带实验前缀。E02 使用独立 Item，未动用 E01 的批次库存。 [用例与通过标准](ERPNext-VALIDATION-PLAN.md) · [Frappe Document API](https://docs.frappe.io/framework/user/en/api/document)
 
-| 用例 | 标准单据和输入 | 预期业务结果 | 实际状态 |
+| 用例 | 标准单据、输入与预期 | 实测行为与库存变化 | 判定 |
 | --- | --- | --- | --- |
-| E01 | Material Receipt，先向 W1/L1 入 STD61 12、STD62 20，再尝试空批次 15。W1/L2 尝试空批次 12 | W1/L1 逐桶独立且合计 47，W1 合计 59，查询和导出能表示领域空值 | **阻塞**。未建立 SKU、仓库、真实批次或库存基线 |
-| E02 | 独立组 Material Receipt，空批次入 3 并重复，再入 STD61。另用独立 Item 对照启用自动建批 | 空批次反复进入同一无批次桶，真实批次独立，观察是否创建 Batch | **阻塞**。无入库提交，未观测拒绝、自动生成或入账 |
-| E04 | Material Issue，请求明确扣无批次 4。无批次 15 基线依赖 E01 | 只扣无批次 15→11，STD61 仍为 12、STD62 仍为 20 | **阻塞**。未建立无批次基线。原生空字段与显式选择语义待实测 |
-| E05 | 原生 Material Issue 和 Material Transfer，源仓位有真实批次，省略批次字段与 Bundle。另测旧字段空值及自动分配关闭时的负例 | 拒绝提交，源、目的、单据及流水无变更。缺少批次标识的领域 BATCH 请求也应拒绝 | **阻塞**。无原生提交。领域 API 负例 **未执行** |
+| E01 | Material Receipt，W1/L1 入 STD61 12、STD62 20 和空批次 15。W1/L2 入空批次 12。目标为 L1 合计 47，W1 合计 59 | 原生两笔有批次对照均通过。空批次 15 和 12 提交均被拒绝。L1 总量 32，STD61=12、STD62=20。L2 总量 0 | **失败** |
+| E02 | 独立组两次 Material Receipt，每次 3 PC 且省略批次，分别传 `use_serial_batch_fields=0/1`。随后入指定 STD61 3。预期两次空批次入同一桶 | 未启用自动建批时，两次空批次提交均被拒绝。指定 STD61 入 3 通过。独立自动建批对照收到 3，但生成了实体 Batch `HP-S1-19D9916B3B-AUTO-0001` 并全数分配到其 Inward Bundle | **失败** |
+| E04 | Material Issue 显式 `batch_no=null` 出 4 PC。预期独立扣减无批次 15→11 | 原生无批次基线无法建立。关闭自动分配时拒绝，开启时从 STD61 扣 4，STD61 12→8，STD62 仍为 20。原生空字段无法表达独立无批次出库 | **失败** |
+| E05 | Material Issue 分别走旧字段和 Bundle 模式，Material Transfer 走 Bundle 模式，均省略批次，数量 4。预期拒绝 | 自动分配关闭时三个负例均拒绝。默认开启时三个均提交，源库 STD61 12→8，STD62 仍为 20。直接移库的目标 W2/L1 得 STD61 4 | **失败**。关闭自动分配的三个原生子项通过 |
 
-各阻塞项的观测错误是前置检查的 `setup_complete=false`。没有提交库存单据，因此没有库存接口错误、单据 ID、流水增量或 Bundle 分配可供记录。NO_BATCH 适配一律 **待验证**。E03、E06–E13、E15–E16、S01–S06 **未执行**。
+批次拒绝均在 `submit()` 抛出 `ValidationError`，消息为 `Serial No / Batch No are mandatory for Item <测试 Item>`。每笔拒绝回滚至请求开始前，单据及明细、Batch、Bundle、SLE、Bin、逐批余额、GL 与重估状态快照完全相同。成功的 E04、E05 探针及其流水先取证，再回滚各自保存点，以同一批次余额比较下一种模式。E05 领域请求缺失 `batchSelection` 或缺少 BATCH 标识的服务端校验 **未执行**。NO_BATCH 适配 **待验证**。E03、E06–E13、E15–E16、S01–S06 **未执行**。
 
 ## 3. 锁定版本源码所示的原生批次限制
 
-- **启用批次的 Item 在入账时要求 Bundle。** 对普通 Material Receipt，Batch 和 Bundle 都未指定时，源码允许自动建批的 Item 进入创建分支。关闭自动建批且没有可复用的在途 Bundle 时，SLE 在后续校验要求批号或序列号。预期失败信息包含 `Serial No / Batch No are mandatory for Item …`，实际异常位置与消息仍须从提交请求取证。 [ERPNext Batch 文档](https://docs.frappe.io/erpnext/batch) · [入账批次处理](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/serial_batch_bundle.py#L410) · [SLE 强制校验](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/doctype/stock_ledger_entry/stock_ledger_entry.py#L332)
-- **自动出库分配可能接受空字段。** `StockEntry.make_serial_and_batch_bundle_for_outward` 在适用的出库行、缺少 Bundle 且打开自动创建时可构造 Outward Bundle，批次选取读取 Stock Settings 的拣选策略。当前原生配置有自动创建和 FIFO，预计会从可用真实批次分配。应分别复测 Bundle 模式和旧批次字段模式，记录选中的批次和数量。 [Stock Entry 自动分配](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/doctype/stock_entry/stock_entry.py#L2382) · [原生 Bundle 文档](https://docs.frappe.io/erpnext/serial-and-batch-bundle)
+- **启用批次的 Item 在入账时要求 Bundle。** Material Receipt 无 Batch、无 Bundle 时，关闭自动建批会在提交时碰到 SLE 强制校验。启用自动建批后，系统走正常批号创建和分配。两种行为均已实际复现。 [ERPNext Batch 文档](https://docs.frappe.io/erpnext/batch) · [入账批次处理](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/serial_batch_bundle.py#L410) · [SLE 强制校验](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/doctype/stock_ledger_entry/stock_ledger_entry.py#L332)
+- **默认自动出库分配接受空字段。** 旧字段和 Bundle 模式下都实测得到 Outward Bundle，分配先入的 STD61。关闭自动出库分配让无选择原生负例拒绝，但仍需由业务 API 明确区分缺失和 NO_BATCH。 [Stock Entry 自动分配](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/doctype/stock_entry/stock_entry.py#L2382) · [原生 Bundle 文档](https://docs.frappe.io/erpnext/serial-and-batch-bundle)
 - **SLE 的单列空值无法确认无批次。** 批号分配可以来自 `serial_and_batch_bundle` 对应的 `Serial and Batch Entry.batch_no`。必须按单据行、仓位、Bundle 明细对账。禁用 Item 批次管理会同时失去该 Item 的真实批次分配能力。 [SLE 批次校验](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/doctype/stock_ledger_entry/stock_ledger_entry.py#L365) · [原生逐批报表查询](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/report/batch_wise_balance_history/batch_wise_balance_history.py#L186)
 
-直接允许一个批次 Item 的库存流水缺少 Bundle 将触及核心校验。源代码支持通过真实 Batch 和 Bundle 入账的候选映射。两条路径的业务结果仍需在指定版本实测。
+直接让批次 Item 的库存流水缺少 Bundle 会触及核心校验。一个符合 ERPNext 原生约束的适配方向是通过内部 Batch 和 Bundle 入账，具体行为见下节验证条件。本轮原生实验采用标准单据，核心源码保持干净。
 
 ## 4. 每 SKU 一个内部 NO_BATCH Batch
 
@@ -61,71 +62,61 @@ GitHub 已确认 PR #1–#4 均合并至 `main`。开始时工作区及暂存区
 - **身份与冲突。** 为每个 SKU 绑定不可变 UUID，以保留前缀 `HP-NB-` 加 32 位 UUID 十六进制生成内部 ID。映射分别对 SKU 和 Batch 设唯一约束，并校验 Batch 属于同一 Item。并发初始化复用已提交映射，遇到已有未归属记录时中止并报告。真实批次的自由文本按 SKU 管理，内部主键另行分配。ERPNext `Batch.autoname` 使用手工 `batch_id` 作为 DocType 全局名称，因此两个 SKU 不能共享同一个内部主键。 [Batch 命名源码](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/doctype/batch/batch.py#L120)
 - **输入与输出。** 按现有 API 草案接受显式 `batchSelection.mode=NO_BATCH`，并按当前 SKU 查映射。收到 `BATCH` 时必须提供真实批次标识，解析失败或指向系统 Batch 时拒绝。出库、移库、盘点缺少 `batchSelection` 时在创建原生单据前拒绝。公共 API、详情、库存汇总和导出统一输出 `batch=null`，通过已登记的映射识别系统 Batch。入库依照草案显式表达空批次。 [项目 API 契约](API-CONTRACTS.md)
 - **写保护与权限。** 仅允许受控服务创建和引用内部 Batch。用独立 App 服务端校验与文档事件限制创建、复制、改名、合并、停用、删除、过期日期变更及手工 Bundle 绑定。普通用户只能通过受仓库范围约束的业务入口选择“无批次”。标准单据、导入、表单、REST 和后台路径都要验证服务端权限。提交前验证 Bundle 的 SKU、仓位、唯一批次与精确数量，避免 FIFO 分到系统桶或跨桶补足。 [Frappe Hooks 文档](https://docs.frappe.io/framework/user/en/python-api/hooks)
-- **库存单据影响。** 入库为目标库位创建 Inward Bundle，重复空批次入库复用 SKU 映射。出库使用限定源库位的 Outward Bundle 并拒绝数量不足。盘点要测试同仓位其他批次保留、指定桶盘零以及调整明细。移库发出和接收分别保留同一系统 Batch 的仓位分配，核对部分接收余量、在途权限和并发超收。这些行为均待实测。
+- **库存单据影响。** 入库为目标库位创建 Inward Bundle，重复空批次入库复用 SKU 映射。出库使用限定源库位的 Outward Bundle 并拒绝数量不足。盘点要测试同仓位其他批次保留、指定桶盘零以及调整明细。移库发出和接收分别保留同一系统 Batch 的仓位分配，核对部分接收余量、在途权限和并发超收。这些行为均待实测。标准批次估值也会处理该桶，应核对混合成本、期初和重估下的行为。
 - **报表和 API 可见性。** 源码显示标准 Batch-wise Balance History 直接读取 Bundle 的 `batch_no`，Stock Ledger 的逐批展示也读取它。标准 REST 对有权限的调用方返回 DocType 字段。因此预测原生报表、详情、REST 或导出会暴露内部 Batch ID，实际权限与角色范围待验证。面向外部仅开放受控查询和导出，并验证普通角色无法从标准入口绕行。内部诊断报表可保留真实原生记录。 [逐批余额报表源码](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/report/batch_wise_balance_history/batch_wise_balance_history.py#L186) · [SLE 报表源码](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/report/stock_ledger/stock_ledger.py#L284) · [Frappe REST 详情源码](https://github.com/frappe/frappe/blob/90c8b61afd60ee49f982ca1a9751008e4ae1e24c/frappe/api/v1.py#L75)
 
 ## 5. E14 第一部分 — 库存估值
 
-**状态为阻塞。** 只读基线中的 SLE、GL Entry、Repost Item Valuation 均为 0，并无已生效的 Stock Entry。当前零行数不能回答交易是否会记账或触发重估。
+**数量最小链路原生通过，是否接受内置估值仍需架构评审。** 两家隔离的虚构公司均使用 CNY、FIFO、标准科目表及各自的成本中心。`Periodic` 关闭永续盘存，`Evergreen` 开启永续盘存。每种入库输入使用独立的非批次 Item，无历史成本、标准率或 Item Price。所有收发只使用标准 Stock Entry。差异科目负例在另一家尚无交易的虚构公司中配置。
 
-向导完成后应使用新建的虚构公司分别验证 `enable_perpetual_inventory=0`、`=1`，在首笔库存业务前确定配置。在每个公司内为各入库条件使用不同的虚构 Item 和库位，使用非批次 Item 消除批次门槛的干扰。库存单据只用 Material Receipt/Issue。记录 Company 币种和估值方法、Warehouse 科目、成本中心、差异科目及 Item 的基础价格来源。原先已有交易的公司保持原配置。
+| 子项 | 关闭永续盘存 | 开启永续盘存 | 判定 |
+| --- | --- | --- | --- |
+| E14-1 省略估值率入 10 PC | 提交成功。余额 10，估值率 0，SLE 库存价值和变动额均为 0，无 GL | `submit()` 拒绝。错误指出记账需要估值率，余额不变 | 关闭时 **原生通过**，开启时 **失败** |
+| E14-2 显式 `basic_rate=0` 入 10 PC | 无需允许零估值标志即可提交。显式启用标志和手工估值的对照也成功，均为零估值、无 GL | 单独给 0 仍在提交时拒绝。用 `allow_zero_valuation_rate=1`、`set_basic_rate_manually=1` 的对照提交，余额 10，估值率和金额均为 0，无 GL | 不设置标志时关闭 **原生通过**、开启 **失败**。显式允许零估值的两组均 **原生通过** |
+| E14-3 非零对照 | 入 10 PC，手工单价 7.50，SLE 库存价值和变动额均为 75.00 CNY，无 GL | 相同 SLE 金额，生成两条 GL。借记库存 75.00，贷记库存差异 75.00 | **原生通过**，证实内置估值仍运行 |
+| E14-4 零估值出库 | 出库 4 PC，余额 10→6。SLE 数量 −4，估值率、库存价值和金额变动均为 0，无 GL | 同左。出库行启用和关闭允许零估值标志的独立对照均成功 | **原生通过** |
+| E14-5 财务科目依赖 | 原生建公司仍初始化 95 个科目和成本中心。公司库存科目、库存差异科目、仓库科目及交易 `expense_account` 均为空，收发成功 | 正常组使用公司默认库存科目和库存差异科目，单据自动带出差异科目与成本中心，仓库无需单独指定科目。独立负例移除默认差异科目且行上未指定科目，即使明确允许零估值也在 `insert()` 拒绝 | 关闭时数量操作 **原生通过**，开启时无差异科目的请求 **失败** |
+| E14-6 重估与单据依赖 | 正常顺序记账未产生重估记录。未创建采购订单、销售订单、发票、采购收货单或销售发货单 | 正常顺序同左。先入 2 PC，再补录时间早 5 秒的 1 PC，产生一条已提交且为 `Queued` 的 Repost Item Valuation，`Bin.actual_qty=3` | **原生通过**，实测触发条件和单据独立性。重估任务消费与完成后的余额和估值 **未执行** |
+| E14 后续矩阵 | 移库、部分接收、盘点、冲销、纠错与未来成本切换 | 同左 | **未执行** |
 
-| 子项 | 可复现输入及观测 | 状态 |
-| --- | --- | --- |
-| E14-1 未填估值率入库 | 收 10 PC，省略 `basic_rate`，`allow_zero_valuation_rate` 关闭，无历史、标准率或物料价格。检查保存与提交时是否回填或拒绝 | **阻塞** |
-| E14-2 显式零估值入库 | 独立组收 10 PC，`basic_rate=0`。先测常规校验，再在独立组按原生字段显式允许零估值，记录手工估值标志及最终持久化字段 | **阻塞** |
-| E14-3 非零对照 | 独立组收 10 PC，手工使用 `basic_rate=7.50` 且无附加费用，核对预期金额 75.00 与实际金额 | **阻塞** |
-| E14-4 零估值出库 | 从已确认的零估值组出 4 PC，预期余额 6，记录源流水及出库前后金额、出库行零估值选项 | **阻塞** |
-| E14-5 账簿与总账 | 每单按 voucher 读取 SLE 的 `incoming_rate`、`outgoing_rate`、`valuation_rate`、`stock_value`、`stock_value_difference` 和 GL Entry 借贷金额。逐例核对是否要求人工补配财务科目及成本中心 | **阻塞** |
-| E14-6 后台与单据依赖 | 读取本组相关 Repost Item Valuation 及队列/worker 状态。核对采购/销售订单、发票、收货单和发货单无新增 | **阻塞** |
-| E14 后续矩阵 | 移库、部分接收、盘点、冲销、纠错与未来成本切换 | **未执行** |
+失败记录保留了原始异常和阶段。未填费率或零费率未开标志的提示以 `Valuation Rate for the Item … is required to do accounting entries for Stock Entry …` 开头。无差异科目时报 `Please enter Difference Account or set default Stock Adjustment Account for company …`。负例保存点回滚后均无单据、库存、Bundle 或 GL 变化。公司在已有流水时变更永续盘存受到原生保护，本轮在不同公司查验开关效果。 [入库估值源码](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/doctype/stock_entry/stock_entry.py#L1944) · [差异科目校验](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/doctype/stock_entry/stock_entry.py#L1022) · [GL 分支](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/controllers/stock_controller.py#L336) · [公司开关保护](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/setup/doctype/company/company.py#L646)
 
-锁定源码显示需要实测的几处配置和行为。
-
-- `StockEntry.set_basic_rate` 对目标行可能回查历史、Item 估值、标准率或物料价格。零估值选项和手工估值会改变计算分支。无可用估值率时，抛错条件还取决于是否允许零估值、调用时是否要求抛错、公司是否启用永续盘存。 [Stock Entry 基础估值](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/doctype/stock_entry/stock_entry.py#L1944) · [估值回查与报错](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/stock_ledger.py#L2562)
-- Stock Entry 提交先更新库存流水，再调用总账和重过账逻辑。普通库存行的 GL 路径与公司永续盘存有关。启用永续盘存时还会校验差异科目。默认公司初始化会生成标准科目，应区分公司建档依赖、交易是否必须手工选科目及交易实际生成的 GL。已存在有效库存流水的公司受关闭永续盘存的保护校验。关闭永续盘存仍需核对 SLE 的库存价值字段。 [Stock Entry 提交流程](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/doctype/stock_entry/stock_entry.py#L695) · [总账分支](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/controllers/stock_controller.py#L336) · [公司保护校验](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/setup/doctype/company/company.py#L646) · [永续盘存文档](https://docs.frappe.io/erpnext/perpetual-inventory)
-- 有后续 SLE、强制重过账或满足队列重过账条件时，可创建 Repost Item Valuation。当前 scheduler 关闭，后续复测若产生任务，应记录任务状态与最终账簿，再得出结论。 [重过账触发条件](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/controllers/stock_controller.py#L2173)
+常规提交和补录探针均在事务内取证。补录探针中的 `Queued` 为事务内的单据状态。站点 scheduler 处于禁用状态，Redis 任务列表为空。实验结束时回滚了该重估记录，任务执行和完成后的账簿待验证。 [重过账触发条件](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/controllers/stock_controller.py#L2173)
 
 ## 6. SLE、Bundle 与余额对账
 
-已观察到空站点的 `Bin=0`、`SLE=0`、`Bundle=0`、`Serial and Batch Entry=0`。这四项是行数，SKU-A 尚不存在，逐批库存与金额实测为 **阻塞**。
+共执行 31 次原生单据探针，20 次通过 `submit()`，11 次拒绝。每次成功都按 `voucher_no` 和 `voucher_detail_no` 连接 SLE、Bundle 与子行，使用 Decimal 对账。Bundle 子行的有符号数量和等于 SLE 的 `actual_qty`，逐批汇总等于原生 Batch-wise Balance History，按 Item 与仓位汇总的 SLE 等于 `Bin.actual_qty`。E01 的 SLE 批次列为空，但 Bundle 子行给出了真实批次。出库与移库对照中 STD62、E02 的两个独立 Item 和未参与仓位均保持原数量。
 
-恢复后每笔记录 Stock Entry 名称、行 ID、提交状态和错误。以 `voucher_type`、`voucher_no`、`voucher_detail_no` 从 SLE 关联 Bundle 子行并确认 SKU、库位、方向。使用 Decimal，校验同一 SLE 下有符号数量之和等于 `actual_qty`，各批次有效流水求和等于逐批报表余额，仓位所有批次合计等于 `Bin.actual_qty` 及最新 SLE 的 `qty_after_transaction`。同时核对其他批次、SKU、库位。被拒绝的请求也应从新事务重读单据、Batch、Bundle、SLE、Bin，E14 同时重读 GL 与重过账记录。先前已单独保存的草稿应维持原状态。单次事务中的新建加提交失败应回滚整笔。
+| 关键探针 | 单据编号后缀 | SLE 与 Bundle 方向 | 仓位余额 |
+| --- | --- | --- | --- |
+| STD61 入库 | 00001 | SLE +12，Inward Bundle STD61 +12 | W1/L1 12 |
+| STD62 入库 | 00002 | SLE +20，Inward Bundle STD62 +20 | W1/L1 32 |
+| E04 空字段出库，自动开 | 00005 | SLE −4，Outward Bundle STD61 −4 | W1/L1 28 |
+| E05 省略字段移库，自动开 | 00005 | 源与目标 SLE −4/+4，各有独立的 STD61 Outward/Inward Bundle | W1/L1 28，W2/L1 4，合计 32 |
+| E14 关闭永续盘存的非零入库 | 00009 | SLE +10，估值变动 +75.00，无 Bundle | 10 |
+| E14 开启永续盘存的非零入库 | 00012 | SLE +10，估值变动 +75.00，无 Bundle，两条 GL | 10 |
 
-## 7. 复现当前阻塞与恢复条件
+同一单据后缀可在回滚后复用。以实验编号、探针标签、SLE 与明细 ID 识别记录。最终总回滚前保留了 14 笔成功提交及其 14 条 SLE、4 个 Bundle、6 条 GL 和 1 条 Repost Item Valuation。另 6 次成功提交已按探针保存点独立复位。总回滚后重查记录计数、配置及队列，结果与实验前一致。使用新数据库连接独立复核了向导标志、站点配置与空库存基线。
 
-以只读方式复现向导标志和库存基线。命令沿用现有容器和实验站点，输出只含标志、应用名与计数。
+## 7. 复现与证据
+
+从仓库根目录向现有容器传入脚本。脚本固定实验站点、目录及数据库主机，检查向导、版本、核心提交和业务表基线。各次运行使用唯一实验编号。数据写入使用标准文档 API，单据、流水、Bundle 与余额使用应用 API 或报表取证。测试以本地 Administrator 权限运行，普通员工权限、公共 API、跨请求提交后的可见性及重估消费均留待后续。 [实验脚本](../dev/erpnext-lab/stage1_native_stock.py)
 
 ```bash
+umask 077
+stage1_evidence=$(mktemp /tmp/haxpower-stage1-evidence.XXXXXX)
 docker exec -i --workdir /workspace/development/frappe-bench/sites \
-  haxpower-erpnext-v16-lab-frappe-1 /workspace/development/frappe-bench/env/bin/python - <<'PY'
-import frappe
-
-frappe.init(site="haxpower.localhost", sites_path=".")
-frappe.connect()
-try:
-    print("setup_complete", frappe.is_setup_complete())
-    print(frappe.get_all("Installed Application", fields=["app_name", "is_setup_complete"]))
-    for doctype in (
-        "Company", "Warehouse", "Item", "Batch", "Bin", "Stock Entry",
-        "Stock Ledger Entry", "Serial and Batch Bundle", "Serial and Batch Entry",
-        "GL Entry", "Repost Item Valuation",
-    ):
-        print(doctype, frappe.db.count(doctype))
-finally:
-    frappe.db.rollback()
-    frappe.destroy()
-PY
+  haxpower-erpnext-v16-lab-frappe-1 /workspace/development/frappe-bench/env/bin/python - \
+  < dev/erpnext-lab/stage1_native_stock.py > "$stage1_evidence"
+sha256sum "$stage1_evidence"
 ```
 
-1. 用户通过现有 VSCode 本地转发打开 `http://localhost:8000`，以自己的现有会话或 Administrator 登录，进入 Setup Wizard。完成站点初始化时只使用虚构测试公司名、缩写和必要资料，时区选 Asia/Shanghai。登录凭据由用户自行保管。
-2. 用户完成向导并确认后，重新运行只读检查，要求 `frappe.is_setup_complete()` 为 `True` 且两应用标志均为 `1`。核对向导所建公司和仓库的来源、时区与初始库存。如果发现不明来源业务记录，保留现场并报告。
-3. 前置复验通过后，为各用例组分配唯一运行编号，建立虚构 Brand、PC 单位、物料、库位及批次，记录运行编号和各单据 ID。原生空值探针先分别测试 `create_new_batch=0` 和 `=1`，以标准 Material Receipt 提交，随后从独立真实批次基线测试无批次出库和省略选择。复用既有运行的证据时，先按运行编号查已提交单据。遇到部分完成的编号先对账。重开实验使用新编号和隔离物料/库位，通过正式调整或冲销进行纠错。
+复现批次拒绝时查看 `E01 empty L1`、`E02 empty legacy=0/1` 和 `E04 explicit null auto=0` 的输入、异常及前后快照。对比 `E02 auto-create`、`E04 explicit null auto=1` 和 `E05 omit … auto=1` 的自动分配。E14 的费率、科目和补录对照均可从相应标签定位。ERPNext 自身在逐批报表和估值兼容路径输出 v16 弃用警告，两次复跑得到一致的主要结果。
 
-现有验证工具单元测试在普通模式、`python -O` 模式分别 17/17 通过。现有 `verify.py --phase site` 在 10:47:33（Asia/Shanghai）开始复验，19/19 项通过，`configuration_only=false`。该命令检查安装、站点服务和资源。证据在实验目录的 `stage1-site-preflight-20261118.json`，SHA-256 为 `79aae9b0c53470b77eba5a5da176ee31165a7133193bf4879ba8bc8cded97a8a`。
+实验目录保留私有证据文件 `stage1-HP-S1-19D9916B3B.json`，SHA-256 为 `8caf5a80cb1fa029c5e5dbe28e487aae472355e68842218e42e8e3d7ccec69f5`。记录了每笔输入、单据状态与错误、单据和行 ID、SLE、Bundle 子行、余额、GL、重估和回滚后的基线。现有验证工具单元测试在普通模式、`python -O` 模式各 17/17 通过。站点完整复验 19/19 通过，证据位于实验目录的 `stage1-site-postrun-20261118.json`，SHA-256 为 `b093a07593a0512241496eb1565339104a66f8a89217778b0785a7a9fa4d6864`。
 
 ## 8. 技术选型与下一轮验证
 
-D009–D012 要求同 SKU 的真实批次与领域空值并存，出库、移库、盘点保留显式桶选择。锁定源码显示与 ERPNext 的 Item 级强制批次及自动拣选存在结构差距。D004–D005 要求 V1 只管理数量，ERPNext 的流水估值路径与库存提交耦合，是否可以避免财务配置负担和不需要的 GL 仍需实测。 [项目决策](DECISIONS.md) · [库存模型](INVENTORY-MODEL.md)
+D009–D012 要求同 SKU 的真实批次与领域空值并存，出库、移库、盘点须显式选择库存桶。原生实测显示必填 Bundle 和自动 FIFO 与这些规则冲突。D004–D005 要求 V1 只管理数量。关闭永续盘存可满足本轮最小收发的零金额和无 GL 目标，仍有公司科目表、库存估值和潜在重过账依赖，需在选型时评审。 [项目决策](DECISIONS.md) · [库存模型](INVENTORY-MODEL.md)
 
-建议保留 ERPNext 作为候选，完成当前轮次的最早否决项再启动路线评审。先执行原生 E01/E02/E04/E05 和 E14 第一部分，取得成功及失败的事务级证据。在单独授权下，再验证 NO_BATCH 的精确扣减和绕行权限，并覆盖盘点、在途部分接收、并发、精度和冲销。若关键场景需要修改核心，或估值与权限负担无法符合验收标准，应比较 Frappe-only 与独立库存引擎。 [验证计划与停止条件](ERPNext-VALIDATION-PLAN.md)
+建议继续保留 ERPNext 候选，只进入单独授权的最小 NO_BATCH 适配验证。首要是证明服务端能拒绝未选择请求并精确扣减内部桶，随后验证标准报表、REST 和导出的越权访问、盘点、在途部分接收及并发和冲销。若这些能力需要修改核心，或会计及权限负担无法满足验收，应比较 Frappe-only 与独立库存引擎。 [验证计划与停止条件](ERPNext-VALIDATION-PLAN.md)
