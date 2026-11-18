@@ -1,6 +1,7 @@
 """Read-only checks executed inside the lab; never print site configuration."""
 
 import re
+from pathlib import Path
 
 TOOLS_CHECK = """
 import json, os, subprocess, sys
@@ -114,34 +115,7 @@ finally:
     frappe.destroy()
 """
 
-HTTP_CHECK = """
-import json, pathlib, urllib.request
-result = {}
-for name, path in {'login': '/login', 'api_ping': '/api/method/ping'}.items():
-    request = urllib.request.Request('http://127.0.0.1:8000' + path,
-                                     headers={'Host': 'haxpower.localhost'})
-    with urllib.request.urlopen(request, timeout=15) as response:
-        body = response.read()
-        if response.status != 200:
-            raise RuntimeError('Unexpected HTTP status: ' + name)
-        if name == 'api_ping' and json.loads(body).get('message') != 'pong':
-            raise RuntimeError('Unexpected API ping response')
-        result[name] = {'status': response.status,
-                        'content_type': response.headers.get('Content-Type')}
-manifest = json.loads(pathlib.Path('sites/assets/assets.json').read_text())
-for key in ('login.bundle.css', 'frappe-web.bundle.js'):
-    path = manifest.get(key)
-    if not path or not path.startswith('/assets/'):
-        raise RuntimeError('Missing public asset manifest entry: ' + key)
-    request = urllib.request.Request('http://127.0.0.1:8000' + path,
-                                     headers={'Host': 'haxpower.localhost'})
-    with urllib.request.urlopen(request, timeout=15) as response:
-        if response.status != 200:
-            raise RuntimeError('Public asset unavailable: ' + key)
-        response.read(1024)
-        result[key] = {'status': response.status}
-print(json.dumps(result))
-"""
+HTTP_CHECK = Path(__file__).with_name('asset_checks.py').read_text()
 
 
 def check_applications(check, compose, lock, phase):

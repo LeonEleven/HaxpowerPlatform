@@ -2,7 +2,7 @@
 
 提供 Stage 0 基础环境及分阶段验证工具。配置生成器不会创建 Bench、站点或业务数据；Bench/ERPNext 安装需按后续明确授权的任务执行。
 
-基础环境实测见 [搭建报告](../../docs/STAGE0-BOOTSTRAP-REPORT.md)，应用与站点进展见 [安装报告](../../docs/STAGE0-ERPNEXT-INSTALL-REPORT.md)，业务用例见 [验证计划](../../docs/ERPNext-VALIDATION-PLAN.md)。
+基础环境实测见 [搭建报告](../../docs/STAGE0-BOOTSTRAP-REPORT.md)，应用与站点进展见 [安装报告](../../docs/STAGE0-ERPNEXT-INSTALL-REPORT.md)，前端缓存排查见 [静态资源报告](../../docs/STAGE0-ASSET-REPAIR-REPORT.md)，业务用例见 [验证计划](../../docs/ERPNext-VALIDATION-PLAN.md)。
 
 ## 文件与隔离布局
 
@@ -12,7 +12,8 @@
 - `prepare.py`：只生成本地配置和随机密码；不下载、安装或运行 Docker/Bench。
 - `verify.py`：统一检查入口，提供 base、bench、site 三个阶段；不安装包或创建站点。
 - `site_checks.py`：独立的开发工具、Bench、应用和站点检查；不输出站点配置或密码。
-- `test_verify.py`：无 Docker 的安全与兼容性回归测试，可在 Python 优化模式下运行。
+- `asset_checks.py`：检查登录页实际引用及 Desk hooks 的 CSS/JS；核对两个 Host 下的 MIME、完整响应与磁盘文件，并只读加载 Setup Wizard Page 检查脚本语法；不代替已登录浏览器验收。
+- `test_verify.py`、`test_assets.py`：无 Docker 的安全、兼容性与静态资源回归测试，可在 Python 优化模式下运行。
 
 ```text
 ~/labs/haxpower-erpnext-v16/            # 不在 HaxpowerPlatform 仓库内
@@ -50,8 +51,8 @@ python3 dev/erpnext-lab/verify.py --lab-root "$HAXPOWER_LAB_ROOT" --phase base -
 ```bash
 python3 dev/erpnext-lab/verify.py --phase bench --output "$HOME/labs/haxpower-erpnext-v16/new-bench-checks.json"
 python3 dev/erpnext-lab/verify.py --phase site --output "$HOME/labs/haxpower-erpnext-v16/new-site-checks.json"
-python3 -m unittest discover -s dev/erpnext-lab -p test_verify.py -v
-python3 -O -m unittest discover -s dev/erpnext-lab -p test_verify.py -v
+python3 -m unittest discover -s dev/erpnext-lab -p 'test_*.py' -v
+python3 -O -m unittest discover -s dev/erpnext-lab -p 'test_*.py' -v
 ```
 
 镜像均从锁定 Digest 拉取，不会因 `latest`、`11.8` 或 `7.4-alpine` 标签变化而漂移。若旧 Digest 不再可用，应先记录并评审新版本，不自动退回浮动标签。该锁定覆盖基础环境；未来 Bench 应用的完整 Python/Node 依赖锁定仍需在安装阶段补齐。
@@ -140,3 +141,13 @@ Bench 启动后，Windows VSCode 从 WSL 打开实验目录，选择 Reopen in C
 新站点scheduler仍为disabled/inactive，worker在线数为1。启用定时任务和完成Setup Wizard需在后续任务中明确安排，不通过修改全局配置或引入真实公司数据完成本轮验收。
 
 创建独立 `haxpower_platform` App、业务数据表或验证数据属于后续任务。安装期间产生的站点配置、源码、依赖、上传文件及数据库都留在实验环境；提交到本仓库前仅提取脱敏证据和经过审阅的自定义资源，不复制整个 Bench。
+
+## 登录页或 Setup Wizard 样式异常
+
+先检查当前 Bench/watch 是否运行，不重复执行 `bench start`。在 Windows Chrome 打开 F12 → Network，勾选 Disable cache 并保持开发者工具打开，再刷新当前页面。本轮用户确认这样操作后样式恢复；服务器修复前的资源请求和无缓存登录页渲染也已正常，因此未重新构建资源。
+
+运行上面的 `--phase site` 检查，使用新的输出文件名保留证据。现在会对 `localhost` 和 `haxpower.localhost` 各检查登录页实际 CSS/JS 与 Desk 共享资源，拒绝重定向、错误 MIME、HTML 冒充资源、缺失文件、越界符号链接和 HTTP 内容与磁盘不一致。Setup Wizard Page 的只读加载和语法检查不执行向导，不创建业务数据，也不自动登录。
+
+Windows 最终人工验收：登录页应居中、图标尺寸正常；进入 Setup Wizard 后布局正常。在 Network 检查 CSS/JS 的请求 URL，CSS 为 200 / `text/css`，JS 为 200 / `text/javascript` 或 `application/javascript`，响应内容不是登录页 HTML。取消 Disable cache 后再普通刷新，确认仍正常。不要为了验收提交向导或录入公司数据，也不要分享 Cookie、密码或完整 HAR。
+
+若资源仍失败，保存失败 URL、状态码、MIME 和脱敏 Console 错误。只有确认文件缺失或映射失配后才评估 Bench 缓存清理或资源重建；开发容器限制为 4 GiB，先检查 watch 与资源余量，不与既有 watch 同时启动另一轮构建。不通过重建站点、升级版本、删除卷或修改全局网络解决样式问题。
