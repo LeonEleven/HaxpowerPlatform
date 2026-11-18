@@ -67,9 +67,9 @@ python3 -O -m unittest discover -s dev/erpnext-lab -p 'test_*.py' -v
 code "$HOME/labs/haxpower-erpnext-v16"
 ```
 
-选择 `Dev Containers: Reopen in Container`。服务为 `frappe`，工作目录 `/workspace/development`，用户 `frappe` / UID 1000；`overrideCommand=false` 保留 `sleep infinity`。本轮仅用同一 Compose 完成无 GUI 启动与检查，VSCode GUI attach 尚待用户验证。
+选择 `Dev Containers: Reopen in Container`。服务为 `frappe`，工作目录 `/workspace/development`，用户 `frappe` / UID 1000；`overrideCommand=false` 保留 `sleep infinity`。基础搭建阶段只验证了无 GUI 启动；用户在后续静态资源排查中已确认 VSCode Dev Container 连接成功。
 
-只预设转发 8000、9000、6787，绑定 localhost，自动发现其他端口关闭；基础阶段尚无 Web 服务监听。不要手动将 3306/6379 转发或发布到公网。关闭该 Dev Container 窗口采用 `stopCompose`；需要保留服务运行时注意这一行为。
+只预设转发 8000、9000、6787，绑定 localhost，自动发现其他端口关闭；站点安装后的 Web 服务由现有 Bench 提供。不要手动将 3306/6379 转发或发布到公网。关闭该 Dev Container 窗口采用 `stopCompose`；需要保留服务运行时注意这一行为。
 
 ## 安全与持久化
 
@@ -136,7 +136,7 @@ bench start
 
 Bench 启动后，Windows VSCode 从 WSL 打开实验目录，选择 Reopen in Container，在“端口”面板确认8000/9000/6787仅转发至localhost；浏览器访问 `http://haxpower.localhost:8000`。若该域名无法解析，可访问 `http://localhost:8000` 并依赖已设置的默认站点；如仍失败，核查本地转发与Host路由，不修改全局DNS。终端中的 `bench start` 持续运行，关闭该终端会停止开发进程；关闭 Dev Container 窗口也可能停止四个基础服务。
 
-当前已有一组Bench开发进程在frappe容器内运行，不要另开第二组；脱敏日志为 `workspace/frappe-bench/logs/lab-start-20261117T090436Z.log`（相对实验根目录）。此处是临时开发进程，Compose不会自动启动它；容器重启后需在Bench目录重新运行 `bench start`。本次已验证容器内HTTP及两个Host路由，但未自动操作Windows VSCode GUI；主机浏览器需要先建立上述端口转发。
+当前已有一组Bench开发进程在frappe容器内运行，不要另开第二组；首次启动的历史脱敏日志为 `workspace/frappe-bench/logs/lab-start-20261117T090436Z.log`（相对实验根目录），不代表容器重启后的当前进程日志。此处是临时开发进程，Compose不会自动启动它；容器重启且确认原进程已停止后，才在Bench目录重新运行 `bench start`。容器内HTTP及两个Host路由已验证；用户也已确认Windows VSCode连接、端口转发和Chrome登录，静态资源排查记录见前述报告。
 
 新站点scheduler仍为disabled/inactive，worker在线数为1。启用定时任务和完成Setup Wizard需在后续任务中明确安排，不通过修改全局配置或引入真实公司数据完成本轮验收。
 
