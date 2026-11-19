@@ -10,7 +10,7 @@ from uuid import NAMESPACE_URL, uuid5
 import frappe
 from erpnext.stock.doctype.serial_and_batch_bundle.serial_and_batch_bundle import get_batch_qty_for_stock
 
-from haxpower_platform import audit_fixtures, integrity_fixtures, transit_fixtures
+from haxpower_platform import audit_fixtures, integrity_fixtures, lightweight_fixtures, transit_fixtures
 
 SITE = "haxpower-stage1b.localhost"
 COMPANY = "HP Stage 1B Lab"
@@ -22,7 +22,7 @@ SYSTEM_DESCRIPTION = "Haxpower internal no-batch bucket"
 INTERNAL_PREFIX = "HP-NB-"
 REAL_PREFIX = "HP-RB-"
 SERVICE_WRITE = ContextVar("stage1b_service_write", default=False)
-EXPERIMENTS = (transit_fixtures, integrity_fixtures, audit_fixtures)
+EXPERIMENTS = (transit_fixtures, integrity_fixtures, audit_fixtures, lightweight_fixtures)
 MANAGED_ITEMS = frozenset((*ITEMS.values(), *(item for scope in EXPERIMENTS for item in scope.ITEMS.values())))
 
 
