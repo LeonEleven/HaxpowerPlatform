@@ -1,0 +1,15 @@
+{
+  "doctype": "DocType",
+  "name": "HP Spike Balance",
+  "module": "Haxpower Stock Spike",
+  "allow_rename": 0,
+  "field_order": ["sku", "location", "batch_id", "quantity", "bucket_version"],
+  "fields": [
+    {"fieldname": "sku", "fieldtype": "Link", "label": "Sku", "options": "HP Spike SKU"},
+    {"fieldname": "location", "fieldtype": "Link", "label": "Location", "options": "HP Spike Location"},
+    {"fieldname": "batch_id", "fieldtype": "Data", "label": "Batch Id"},
+    {"fieldname": "quantity", "fieldtype": "Float", "label": "Quantity", "precision": "9"},
+    {"fieldname": "bucket_version", "fieldtype": "Int", "label": "Bucket Version"}
+  ],
+  "permissions": []
+}

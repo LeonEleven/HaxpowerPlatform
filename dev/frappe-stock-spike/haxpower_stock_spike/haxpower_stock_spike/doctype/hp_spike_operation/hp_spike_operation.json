@@ -1,0 +1,15 @@
+{
+  "doctype": "DocType",
+  "name": "HP Spike Operation",
+  "module": "Haxpower Stock Spike",
+  "allow_rename": 0,
+  "field_order": ["actor", "operation_type", "payload_hash", "outcome", "transfer_ref"],
+  "fields": [
+    {"fieldname": "actor", "fieldtype": "Link", "label": "Actor", "options": "User"},
+    {"fieldname": "operation_type", "fieldtype": "Data", "label": "Operation Type"},
+    {"fieldname": "payload_hash", "fieldtype": "Data", "label": "Payload Hash"},
+    {"fieldname": "outcome", "fieldtype": "Long Text", "label": "Outcome"},
+    {"fieldname": "transfer_ref", "fieldtype": "Link", "label": "Transfer Ref", "options": "HP Spike Transfer"}
+  ],
+  "permissions": []
+}

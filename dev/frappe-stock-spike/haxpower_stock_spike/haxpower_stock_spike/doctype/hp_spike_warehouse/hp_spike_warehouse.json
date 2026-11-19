@@ -1,0 +1,12 @@
+{
+  "doctype": "DocType",
+  "name": "HP Spike Warehouse",
+  "module": "Haxpower Stock Spike",
+  "allow_rename": 0,
+  "autoname": "field:code",
+  "field_order": ["code"],
+  "fields": [
+    {"fieldname": "code", "fieldtype": "Data", "label": "Code", "reqd": 1}
+  ],
+  "permissions": []
+}

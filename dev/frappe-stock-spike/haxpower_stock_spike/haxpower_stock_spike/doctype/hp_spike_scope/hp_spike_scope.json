@@ -1,0 +1,14 @@
+{
+  "doctype": "DocType",
+  "name": "HP Spike Scope",
+  "module": "Haxpower Stock Spike",
+  "allow_rename": 0,
+  "autoname": "field:actor",
+  "field_order": ["actor", "mode", "warehouses"],
+  "fields": [
+    {"fieldname": "actor", "fieldtype": "Link", "label": "Actor", "options": "User", "reqd": 1},
+    {"fieldname": "mode", "fieldtype": "Data", "label": "Mode", "reqd": 1},
+    {"fieldname": "warehouses", "fieldtype": "Long Text", "label": "Warehouses"}
+  ],
+  "permissions": []
+}

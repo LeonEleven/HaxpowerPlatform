@@ -1,0 +1,19 @@
+{
+  "doctype": "DocType",
+  "name": "HP Spike Event",
+  "module": "Haxpower Stock Spike",
+  "allow_rename": 0,
+  "field_order": ["operation", "operation_type", "bucket", "sku", "location", "batch_id", "delta", "bucket_version", "reversal_of"],
+  "fields": [
+    {"fieldname": "operation", "fieldtype": "Link", "label": "Operation", "options": "HP Spike Operation"},
+    {"fieldname": "operation_type", "fieldtype": "Data", "label": "Operation Type"},
+    {"fieldname": "bucket", "fieldtype": "Link", "label": "Bucket", "options": "HP Spike Balance"},
+    {"fieldname": "sku", "fieldtype": "Link", "label": "Sku", "options": "HP Spike SKU"},
+    {"fieldname": "location", "fieldtype": "Link", "label": "Location", "options": "HP Spike Location"},
+    {"fieldname": "batch_id", "fieldtype": "Data", "label": "Batch Id"},
+    {"fieldname": "delta", "fieldtype": "Float", "label": "Delta", "precision": "9"},
+    {"fieldname": "bucket_version", "fieldtype": "Int", "label": "Bucket Version"},
+    {"fieldname": "reversal_of", "fieldtype": "Link", "label": "Reversal Of", "options": "HP Spike Event"}
+  ],
+  "permissions": []
+}

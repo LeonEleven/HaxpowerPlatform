@@ -1,0 +1,17 @@
+{
+  "doctype": "DocType",
+  "name": "HP Spike Count Task",
+  "module": "Haxpower Stock Spike",
+  "allow_rename": 0,
+  "field_order": ["actor", "sku", "location", "batch_id", "baseline", "baseline_version", "applied_operation"],
+  "fields": [
+    {"fieldname": "actor", "fieldtype": "Link", "label": "Actor", "options": "User"},
+    {"fieldname": "sku", "fieldtype": "Link", "label": "Sku", "options": "HP Spike SKU"},
+    {"fieldname": "location", "fieldtype": "Link", "label": "Location", "options": "HP Spike Location"},
+    {"fieldname": "batch_id", "fieldtype": "Data", "label": "Batch Id"},
+    {"fieldname": "baseline", "fieldtype": "Float", "label": "Baseline", "precision": "9"},
+    {"fieldname": "baseline_version", "fieldtype": "Int", "label": "Baseline Version"},
+    {"fieldname": "applied_operation", "fieldtype": "Link", "label": "Applied Operation", "options": "HP Spike Operation"}
+  ],
+  "permissions": []
+}

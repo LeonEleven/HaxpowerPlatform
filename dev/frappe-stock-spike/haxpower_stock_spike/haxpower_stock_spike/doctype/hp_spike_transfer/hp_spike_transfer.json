@@ -1,0 +1,16 @@
+{
+  "doctype": "DocType",
+  "name": "HP Spike Transfer",
+  "module": "Haxpower Stock Spike",
+  "allow_rename": 0,
+  "field_order": ["sku", "source", "target", "batch_id", "dispatched", "received"],
+  "fields": [
+    {"fieldname": "sku", "fieldtype": "Link", "label": "Sku", "options": "HP Spike SKU"},
+    {"fieldname": "source", "fieldtype": "Link", "label": "Source", "options": "HP Spike Location"},
+    {"fieldname": "target", "fieldtype": "Link", "label": "Target", "options": "HP Spike Location"},
+    {"fieldname": "batch_id", "fieldtype": "Data", "label": "Batch Id"},
+    {"fieldname": "dispatched", "fieldtype": "Float", "label": "Dispatched", "precision": "9"},
+    {"fieldname": "received", "fieldtype": "Float", "label": "Received", "precision": "9"}
+  ],
+  "permissions": []
+}

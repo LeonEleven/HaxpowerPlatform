@@ -1,0 +1,12 @@
+[project]
+name = "haxpower_stock_spike"
+version = "0.1.0"
+description = "HaxpowerPlatform Stage 2A isolated Frappe inventory experiment"
+requires-python = ">=3.14,<3.15"
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.package-data]
+haxpower_stock_spike = ["modules.txt", "patches.txt", "haxpower_stock_spike/doctype/*/*.json"]
