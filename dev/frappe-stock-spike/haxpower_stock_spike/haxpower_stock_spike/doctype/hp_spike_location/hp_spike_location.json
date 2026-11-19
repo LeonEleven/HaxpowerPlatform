@@ -1,0 +1,14 @@
+{
+  "doctype": "DocType",
+  "name": "HP Spike Location",
+  "module": "Haxpower Stock Spike",
+  "allow_rename": 0,
+  "autoname": "field:code",
+  "field_order": ["code", "warehouse_id", "in_transit"],
+  "fields": [
+    {"fieldname": "code", "fieldtype": "Data", "label": "Code", "reqd": 1},
+    {"fieldname": "warehouse_id", "fieldtype": "Link", "label": "Warehouse Id", "options": "HP Spike Warehouse", "reqd": 1},
+    {"fieldname": "in_transit", "fieldtype": "Check", "label": "In Transit"}
+  ],
+  "permissions": []
+}
