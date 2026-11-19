@@ -1,0 +1,18 @@
+"""Fixed fictional fixtures in the existing isolated Stage 1B site."""
+
+COMPANY = "HP Stage 1E Lab"
+ITEMS = {
+    "COUNT": "HP1E-COUNT",
+    "COUNT-ZERO": "HP1E-COUNT-ZERO",
+    "COUNT-RACE": "HP1E-COUNT-RACE",
+    "RACE-STD61": "HP1E-RACE-STD61",
+    "RACE-NULL": "HP1E-RACE-NULL",
+    "PC": "HP1E-PC",
+    "FRACTION": "HP1E-FRACTION",
+    "SHARED-TRANSIT": "HP1E-SHARED-TRANSIT",
+    "SHARED-TRANSIT-NULL": "HP1E-SHARED-TRANSIT-NULL",
+}
+TRANSFER_ITEMS = {sku: ITEMS[sku] for sku in ("SHARED-TRANSIT", "SHARED-TRANSIT-NULL")}
+LOCATIONS = {"W1/L1": "HP1E W1 L1 - H1E", "W1/L2": "HP1E W1 L2 - H1E", "W2/L1": "HP1E W2 L1 - H1E"}
+TRANSIT = "HP1E Transit - H1E"
+FRACTION_UOM = "HP1E Decimal"

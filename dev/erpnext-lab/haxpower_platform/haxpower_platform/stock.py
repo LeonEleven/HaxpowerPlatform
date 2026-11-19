@@ -10,7 +10,7 @@ from uuid import NAMESPACE_URL, uuid5
 import frappe
 from erpnext.stock.doctype.serial_and_batch_bundle.serial_and_batch_bundle import get_batch_qty_for_stock
 
-from haxpower_platform import transit_fixtures
+from haxpower_platform import integrity_fixtures, transit_fixtures
 
 SITE = "haxpower-stage1b.localhost"
 COMPANY = "HP Stage 1B Lab"
@@ -22,7 +22,7 @@ SYSTEM_DESCRIPTION = "Haxpower internal no-batch bucket"
 INTERNAL_PREFIX = "HP-NB-"
 REAL_PREFIX = "HP-RB-"
 SERVICE_WRITE = ContextVar("stage1b_service_write", default=False)
-MANAGED_ITEMS = frozenset((*ITEMS.values(), *transit_fixtures.ITEMS.values()))
+MANAGED_ITEMS = frozenset((*ITEMS.values(), *transit_fixtures.ITEMS.values(), *integrity_fixtures.ITEMS.values()))
 
 
 class BundlePermissionMixin:
@@ -32,10 +32,12 @@ class BundlePermissionMixin:
                 and permtype in ("create", "write", "submit", "cancel", "delete", "amend")):
             stage1b = (self.company == COMPANY and self.item_code in ITEMS.values()
                        and self.warehouse in LOCATIONS.values())
-            stage1d = (self.company == transit_fixtures.COMPANY
-                       and self.item_code in transit_fixtures.ITEMS.values()
-                       and self.warehouse in (*transit_fixtures.LOCATIONS.values(), transit_fixtures.TRANSIT))
-            return SERVICE_WRITE.get() and (stage1b or stage1d) and permtype in ("create", "write", "submit")
+            experiment = any(
+                self.company == fixtures.COMPANY and self.item_code in fixtures.ITEMS.values()
+                and self.warehouse in (*fixtures.LOCATIONS.values(), fixtures.TRANSIT)
+                for fixtures in (transit_fixtures, integrity_fixtures)
+            )
+            return SERVICE_WRITE.get() and (stage1b or experiment) and permtype in ("create", "write", "submit")
         return super().has_permission(permtype, debug=debug, user=user)
 
 
@@ -124,15 +126,15 @@ def find_batch(item, number, *, create=False):
     return key
 
 
-def post_entry(action, item, warehouse, qty, key, remarks):
+def post_entry(action, item, warehouse, qty, key, remarks, *, company=COMPANY, uom="PC"):
     receipt = action == "RECEIPT"
     direction = "t_warehouse" if receipt else "s_warehouse"
     doc = frappe.get_doc({
-        "doctype": "Stock Entry", "company": COMPANY,
+        "doctype": "Stock Entry", "company": company,
         "stock_entry_type": "Material Receipt" if receipt else "Material Issue",
         "remarks": remarks,
         "items": [{
-            "item_code": item, "qty": qty, "uom": "PC",
+            "item_code": item, "qty": qty, "uom": uom,
             "batch_no": key, "use_serial_batch_fields": 1,
             "allow_zero_valuation_rate": 1, direction: warehouse,
         }],
