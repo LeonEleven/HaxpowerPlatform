@@ -32,3 +32,18 @@ doc_events = {
         ("before_insert", *inventory_events), "haxpower_platform.stock.protect_inventory",
     ),
 }
+
+# Guard the isolated Stage 1F scope even if another adapter sets its service flag.
+for stock_doctype in ("Stock Entry", "Stock Reconciliation", "Serial and Batch Bundle", "Stock Ledger Entry"):
+    for event, handler in doc_events[stock_doctype].items():
+        doc_events[stock_doctype][event] = ["haxpower_platform.audit.protect_stock", handler]
+
+doc_events["Repost Item Valuation"] = dict.fromkeys(
+    ("before_validate", "before_submit", "before_update_after_submit"),
+    "haxpower_platform.audit.protect_repost",
+)
+
+doc_events["Transaction Deletion Record"] = dict.fromkeys(
+    ("before_insert", "before_validate", "before_submit", "before_update_after_submit"),
+    "haxpower_platform.audit.protect_deletion",
+)

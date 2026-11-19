@@ -1,0 +1,141 @@
+{
+  "doctype": "DocType",
+  "name": "Stage 1F Audit Event",
+  "module": "Haxpower Platform",
+  "autoname": "field:record_id",
+  "allow_rename": 0,
+  "field_order": [
+    "record_id",
+    "action",
+    "payload_hash",
+    "document_type",
+    "document_id",
+    "document_line",
+    "item_code",
+    "batch_key",
+    "batch_number",
+    "actor",
+    "source_location",
+    "target_location",
+    "planned_target",
+    "quantity_delta",
+    "occurred_at",
+    "reversal_of",
+    "dispatch_event",
+    "count_task"
+  ],
+  "fields": [
+    {
+      "fieldname": "record_id",
+      "fieldtype": "Data",
+      "label": "Record Id",
+      "reqd": 1,
+      "unique": 1
+    },
+    {
+      "fieldname": "action",
+      "fieldtype": "Data",
+      "label": "Action",
+      "reqd": 1
+    },
+    {
+      "fieldname": "payload_hash",
+      "fieldtype": "Data",
+      "label": "Payload Hash",
+      "reqd": 1
+    },
+    {
+      "fieldname": "document_type",
+      "fieldtype": "Data",
+      "label": "Document Type",
+      "reqd": 1
+    },
+    {
+      "fieldname": "document_id",
+      "fieldtype": "Data",
+      "label": "Document Id",
+      "reqd": 1,
+      "unique": 1
+    },
+    {
+      "fieldname": "document_line",
+      "fieldtype": "Data",
+      "label": "Document Line",
+      "reqd": 1
+    },
+    {
+      "fieldname": "item_code",
+      "fieldtype": "Data",
+      "label": "Item Code",
+      "reqd": 1,
+      "search_index": 1
+    },
+    {
+      "fieldname": "batch_key",
+      "fieldtype": "Data",
+      "label": "Batch Key",
+      "reqd": 1
+    },
+    {
+      "fieldname": "batch_number",
+      "fieldtype": "Data",
+      "label": "Batch Number"
+    },
+    {
+      "fieldname": "actor",
+      "fieldtype": "Data",
+      "label": "Actor",
+      "reqd": 1
+    },
+    {
+      "fieldname": "source_location",
+      "fieldtype": "Data",
+      "label": "Source Location"
+    },
+    {
+      "fieldname": "target_location",
+      "fieldtype": "Data",
+      "label": "Target Location"
+    },
+    {
+      "fieldname": "planned_target",
+      "fieldtype": "Data",
+      "label": "Planned Target"
+    },
+    {
+      "fieldname": "quantity_delta",
+      "fieldtype": "Float",
+      "label": "Quantity Delta",
+      "precision": "9",
+      "reqd": 1
+    },
+    {
+      "fieldname": "occurred_at",
+      "fieldtype": "Datetime",
+      "label": "Occurred At",
+      "reqd": 1
+    },
+    {
+      "fieldname": "reversal_of",
+      "fieldtype": "Link",
+      "label": "Reversal Of",
+      "options": "Stage 1F Audit Event",
+      "search_index": 1
+    },
+    {
+      "fieldname": "dispatch_event",
+      "fieldtype": "Link",
+      "label": "Dispatch Event",
+      "options": "Stage 1F Audit Event",
+      "search_index": 1
+    },
+    {
+      "fieldname": "count_task",
+      "fieldtype": "Link",
+      "label": "Count Task",
+      "options": "Stage 1F Count Task",
+      "unique": 1
+    }
+  ],
+  "permissions": []
+}

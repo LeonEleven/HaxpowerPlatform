@@ -85,7 +85,7 @@ def stock_quantity(item, batch, warehouse, company):
     return sum((Decimal(str(row[0])) for row in rows), Decimal(0))
 
 
-def submit_stock(item, batch, qty, source, target, remarks, *, company, outgoing=None, source_row=None):
+def submit_stock(item, batch, qty, source, target, remarks, *, company, outgoing=None, source_row=None, start_transit=True):
     row = {"item_code": item, "qty": qty, "uom": "PC", "use_serial_batch_fields": 1, "batch_no": batch,
            "allow_zero_valuation_rate": 1, "s_warehouse": source, "t_warehouse": target}
     if outgoing:
@@ -95,7 +95,7 @@ def submit_stock(item, batch, qty, source, target, remarks, *, company, outgoing
         doc = frappe.get_doc({
             "doctype": "Stock Entry", "company": company, "stock_entry_type": "Material Transfer",
             "from_warehouse": source, "to_warehouse": target, "remarks": remarks,
-            "add_to_transit": int(outgoing is None), "outgoing_stock_entry": outgoing, "items": [row],
+            "add_to_transit": int(start_transit and outgoing is None), "outgoing_stock_entry": outgoing, "items": [row],
         }).insert(ignore_permissions=True)
         doc.submit()
     finally:
