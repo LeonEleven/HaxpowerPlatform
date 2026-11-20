@@ -74,9 +74,12 @@ def verify_seed():
     frappe.set_user("Administrator")
     for suffix in ("A", "B"):
         code = f"{PREFIX}-{suffix}"
-        result, = sku.search_skus(code)
+        record_id = frappe.db.get_value(SKU, {"code": code}, "name")
+        require(record_id, "synthetic V1-03 SKU identity is missing")
+        result = sku.get_sku(record_id)
         mapping = sku.diagnose_item_mapping(code)
-        require(sku.get_sku(result.id) == result and mapping.sku_id == mapping.marker == result.id
+        require(result.id == record_id and result.data.code == code
+                and mapping.sku_id == mapping.marker == record_id
                 and mapping.status == "Verified" and sku.get_brand(result.data.brand).data.code == code
                 and service.get_specification(result.data.specification).revision == 2,
                 "synthetic brand, SKU, specification or Item did not survive the upgrade")
