@@ -2,22 +2,20 @@
 
 ## 开始任务前
 
-- 先阅读 `README.md`、`docs/DECISIONS.md` 和相关设计文档。
+- 先阅读 [项目交接](docs/PROJECT-HANDOFF.md)、[README](README.md)、[项目决策](docs/DECISIONS.md) 和相关设计文档。核对最新 `origin/main`、当前分支及相关 PR 的实际状态。
 - 如果需求与文档冲突，先指出冲突并提出修订，不要自行猜测。
 - 明确任务属于需求澄清、原型验证、架构设计、实现还是测试。
 
 ## 当前阶段限制
 
-最终技术栈尚未确定。在用户批准路线前，不要批量生成完整业务代码或不可逆数据库迁移。允许创建原型、验证脚本、测试用例、API
-草案和设计文档。
+项目已进入正式 V1 工程阶段，当前进行 Stage 3A 工程准备。ERPNext v16 + 独立 HaxpowerPlatform Frappe App 是项目方原则批准的路线。按 [V1 开发 Backlog](docs/V1-DEVELOPMENT-BACKLOG.md) 和当前授权范围实施；Stage 3A 审查完成后从 V1-01 开始。上线须通过 [V1 验收清单](docs/V1-ACCEPTANCE-CHECKLIST.md)。
 
 ## 架构原则
 
 - API-first；网页、小程序、AI 服务通过受控业务 API 访问。
 - V1 优先模块化单体，不提前引入微服务。
 - 领域模型尽量与 ERPNext 内部结构解耦。
-- 若采用 ERPNext，使用独立 Frappe App、Hooks 和受支持接口，不修改
-  ERPNext 核心源码。
+- 使用独立 Frappe App、Hooks 和受支持接口，不修改 Frappe/ERPNext 核心源码。
 - 公共 API 不暴露 ERPNext 内部 DocType/数据库结构。
 - 前端不得直接访问数据库；外部客户端不得持有管理员密钥。
 
@@ -55,9 +53,7 @@
 
 ## 安全
 
-不提交密码、API Secret、云服务器密钥或生产数据到
-Git。生产操作前备份。上传文件需校验类型、大小和权限。日志不得无必要记录合同全文、密码或
-Token。
+不提交密码、API Secret、云服务器密钥、Token、生产数据或数据库备份到 Git。阿里云生产环境的访问与修改须事先获得批准，生产操作前备份。上传文件需校验类型、大小和权限。日志不得无必要记录合同全文、密码或 Token。
 
 ## Git 协作规范
 
@@ -75,3 +71,5 @@ Token。
 ## 交付说明
 
 完成任务时说明修改内容、测试结果、已知限制和未解决问题。
+
+完成重要开发阶段时更新 [项目交接](docs/PROJECT-HANDOFF.md) 的进度快照，记录核对日期、对应 PR、验收证据及下一任务。业务确认以 [项目决策](docs/DECISIONS.md) 和项目方的明确结论为依据，未经确认的业务提案须保持待确认。
