@@ -60,11 +60,18 @@ def verify_native_denials(site):
     password = "Aa9!" + token_urlsafe(24)
     user = frappe.get_doc(
         doctype="User", email=user_id, first_name="Synthetic catalog HTTP", user_type="System User",
-        send_welcome_email=0, new_password=password, roles=[{"role": "Employee"}],
+        send_welcome_email=0, new_password=password, roles=[{"role": "Employee"}, {"role": "Item Manager"}],
     )
     user.insert(ignore_permissions=True)
     frappe.db.commit()
-    before = snapshot()
+    from haxpower_v1.adapters.erpnext.item import SKU_MARKER
+    from sku_probe import PREFIX, snapshot as sku_snapshot
+
+    sku_name = f"{PREFIX}-A"
+    sku_doctype = "HP V1 Stock Item"
+    sku_id = frappe.db.get_value(sku_doctype, {"code": sku_name}, "name")
+    require(sku_id, "missing synthetic SKU")
+    before = snapshot(), sku_snapshot()
 
     def exercise():
         client = get_test_client()
@@ -93,7 +100,22 @@ def verify_native_denials(site):
             ("DELETE", f"/api/resource/{audit}/{audit_id}", None),
             ("POST", "/api/method/frappe.client.set_value",
              {"doctype": VALUE, "name": child_id, "fieldname": "option_key", "value": "SYNTHETIC-CHANGED"}),
+            ("POST", "/api/method/haxpower_v1.catalog.sku.create_sku", {}),
+            ("GET", f"/api/resource/{quote(sku_doctype, safe='')}/{sku_id}", None),
+            ("POST", f"/api/resource/{quote(sku_doctype, safe='')}", {"code": "SYNTHETIC-DENIED"}),
+            ("PATCH", f"/api/v2/document/{quote(sku_doctype, safe='')}/{sku_id}", {"display_name": "Denied"}),
+            ("DELETE", f"/api/v2/document/{quote(sku_doctype, safe='')}/{sku_id}", None),
+            ("PUT", f"/api/resource/Item/{sku_name}", {"disabled": 1}),
+            ("PATCH", f"/api/v2/document/Item/{sku_name}", {"item_name": "Denied"}),
+            ("DELETE", f"/api/v2/document/Item/{sku_name}", None),
+            ("POST", "/api/method/frappe.client.set_value",
+             {"doctype": "Item", "name": sku_name, "fieldname": "disabled", "value": 1}),
         )
+        for endpoint in (f"/api/resource/Item/{sku_name}", f"/api/v2/document/Item/{sku_name}"):
+            response = request("GET", endpoint)
+            require(response.status_code == 200 and not response.json["data"].get(SKU_MARKER),
+                    "native Item read exposed the internal mapping marker")
+
         for method, path, data in denied:
             response = request(method, path, data)
             require(response.status_code == 403, f"expected native HTTP denial for {method} {path}, got {response.status_code}")
@@ -103,5 +125,6 @@ def verify_native_denials(site):
     with ThreadPoolExecutor(max_workers=1) as executor:
         checked = executor.submit(exercise).result()
     frappe.db.rollback()
-    require(before == snapshot(), "denied native HTTP requests changed catalog data")
-    print(f"Authenticated non-maintenance user: {checked} native HTTP writes denied with no catalog changes.")
+    require(before == (snapshot(), sku_snapshot()), "denied HTTP requests changed catalog or Item data")
+    print(f"Authenticated non-maintenance user: {checked} HTTP requests denied, "
+          "two native reads hid the mapping marker, catalog and Item data unchanged.")
