@@ -30,7 +30,7 @@ OWNER = "org.haxpower.v1.checkout"
 RUNTIME = {"web", "socketio", "worker", "scheduler"}
 BASE = {"mariadb", "redis-cache", "redis-queue", "bench"}
 VOLUMES = {"bench-data", "db-data", "queue-data"}
-NETWORKS = {"backend", "egress"}
+NETWORKS = {"backend", "egress", "frontend"}
 IMAGE_SERVICES = {
     "bench": RUNTIME | {"bench", "volume-init"},
     "mariadb": {"mariadb"},
@@ -160,7 +160,8 @@ class Project:
                         and resource.get("labels", {}).get(OWNER) == self.owner,
                         "unsafe network or volume definition")
         require(model["networks"]["backend"].get("internal") is True
-                and not model["networks"]["egress"].get("internal"), "incorrect network boundary")
+                and not any(model["networks"][name].get("internal") for name in ("egress", "frontend")),
+                "incorrect network boundary")
         require(set(model["services"]) == BASE | RUNTIME | {"volume-init"}, "unexpected service list")
         require(set(model["secrets"]) == {"db-root", "site-admin"}, "unexpected secrets")
         for name, value in model["secrets"].items():
@@ -178,7 +179,11 @@ class Project:
                     "develop", "env_file", "configs", "extends", "provider", "use_api_socket")),
                 f"unsafe service configuration for {name}")
         require(service.get("labels", {}).get(OWNER) == self.owner, f"missing owner label for {name}")
-        expected_networks = {"backend", "egress"} if name == "bench" else {"backend"}
+        expected_networks = {"backend"}
+        if name == "bench":
+            expected_networks.add("egress")
+        if name in {"web", "socketio"}:
+            expected_networks.add("frontend")
         require((name == "volume-init" and service.get("network_mode") == "none"
                  and not service.get("networks")) or
                 (name != "volume-init" and not service.get("network_mode")
@@ -256,6 +261,8 @@ class Project:
         networks = {"none"} if service == "volume-init" else {f"{self.project}_backend"}
         if service == "bench":
             networks.add(f"{self.project}_egress")
+        if service in {"web", "socketio"}:
+            networks.add(f"{self.project}_frontend")
         require(not host["Privileged"] and not host["VolumesFrom"]
                 and set(container["NetworkSettings"]["Networks"]) <= networks
                 and host["NetworkMode"] in networks,

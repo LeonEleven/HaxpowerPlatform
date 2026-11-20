@@ -68,12 +68,18 @@ services:
   web:
     <<: *bench
     profiles: [runtime]
+    networks:
+      backend: {}
+      frontend: {gw_priority: 1}
     command: [python, /opt/hp-v1/bench.py, web]
     ports: ["127.0.0.1:${HP_V1_WEB_PORT}:${HP_V1_WEB_PORT}"]
 
   socketio:
     <<: *bench
     profiles: [runtime]
+    networks:
+      backend: {}
+      frontend: {gw_priority: 1}
     command: [python, /opt/hp-v1/bench.py, socketio]
     ports: ["127.0.0.1:${HP_V1_SOCKET_PORT}:${HP_V1_SOCKET_PORT}"]
 
@@ -133,6 +139,7 @@ secrets:
 networks:
   backend: {internal: true, labels: *owner}
   egress: {driver: bridge, labels: *owner}
+  frontend: {driver: bridge, labels: *owner}
 
 volumes:
   bench-data: {labels: *owner}

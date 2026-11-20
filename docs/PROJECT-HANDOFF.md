@@ -81,7 +81,7 @@ B01–B12 均待确认。盘点冻结与截止、预留需求、留存、切换�
 
 ## 6. 当前项目进度
 
-**状态快照，2026-11-20（Asia/Shanghai）。** 开工时 GitHub 确认 Stage 3A PR #13 已合并，重新 fetch 后的 `origin/main` 为 `3908c9aec0c5eda1d3f0d41c4ee18a70074b3038`。V1-01 在 `feat/v1-01-bootstrap` 实现正式 App、独立 Compose、合成迁移演练及 PR CI。
+**状态快照，2026-11-20（Asia/Shanghai）。** 开工时 GitHub 确认 Stage 3A PR #13 已合并，重新 fetch 后的 `origin/main` 为 `3908c9aec0c5eda1d3f0d41c4ee18a70074b3038`。V1-01 的 Draft PR #14 在 `feat/v1-01-bootstrap` 实现正式 App、独立 Compose、合成迁移演练及 PR CI。
 
 | 文档 | 当前范围 |
 | --- | --- |
@@ -89,14 +89,14 @@ B01–B12 均待确认。盘点冻结与截止、预留需求、留存、切换�
 | [验收清单](V1-ACCEPTANCE-CHECKLIST.md) | A01 至 A19，共 19 项待正式验收。 |
 | [生产就绪差距](PRODUCTION-READINESS-GAPS.md) | G01 至 G12 待关闭，B01 至 B12 待业务确认。 |
 
-- **A01 本地证据。** WSL2 的 Docker 启动正式项目并核对镜像、上游提交、导入来源及现场数据库用户 `hpv1_dev`。11 项预检测试在 Python 正常和优化模式通过，并实测占用端口、实验项目和站点覆盖被拒绝。第二个工作区独立准备同一套锁定依赖。
-- **A02 本地证据。** `haxpower-v1-dev.localhost` 从空站实际安装 ERPNext 与 `haxpower_v1`，两次 `bench migrate` 和 2 项 Frappe 集成测试完成。第二工作区的迁移前后状态、故障恢复及 PR CI 证据继续核对。A01/A02 和 G01 的正式签核保留至发布候选。
+- **A01 本地证据。** WSL2 的 Docker 启动正式项目并核对镜像、上游提交、导入来源及现场数据库用户 `hpv1_dev`。11 项预检测试在 Python 正常和优化模式通过，并实测占用端口、实验项目和站点覆盖被拒绝。第二个工作区独立准备同一套锁定依赖。开发站通过 Web 和 Socket.IO 回环烟测及非法 Host 拒绝检查，worker 和 scheduler 实际运行。
+- **A02 本地证据。** `haxpower-v1-dev.localhost` 从空站实际安装 ERPNext 与 `haxpower_v1`，两次 `bench migrate` 和 2 项 Frappe 集成测试完成。第二工作区空站安装及重复迁移通过，按表结构、样例记录和补丁日志比较的 SHA-256 均为 `3925938fe7bf3e3791781b8928b3f7f8f217af8a5dd5d674acd1256ae4c918fb`。合成前版本恢复和 PR CI 证据继续核对。A01/A02 和 G01 的正式签核保留至发布候选。
 
 下一任务为 **V1-02 分类、属性与规格**。开始前复核 V1-01 的真实 CI 与独立工作区安装、迁移和恢复证据。B01–B12 保持待确认。
 
 每次完成重要开发阶段时更新此节，记录日期、对应 PR 或提交、实际完成范围、验收证据、未决项及下一任务。PR 状态是带日期的核对结果，下一会话重新查询。
 
-[V1-01](V1-DEVELOPMENT-BACKLOG.md#v1-01-正式-app-骨架及开发基线) · [V1-01 任务分支](https://github.com/LeonEleven/HaxpowerPlatform/compare/main...feat/v1-01-bootstrap) · [PR #13](https://github.com/LeonEleven/HaxpowerPlatform/pull/13)
+[V1-01](V1-DEVELOPMENT-BACKLOG.md#v1-01-正式-app-骨架及开发基线) · [Draft PR #14 及验收证据](https://github.com/LeonEleven/HaxpowerPlatform/pull/14) · [PR #13](https://github.com/LeonEleven/HaxpowerPlatform/pull/13)
 
 ## 7. 不可破坏的技术约束
 

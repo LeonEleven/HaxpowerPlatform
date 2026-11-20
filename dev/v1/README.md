@@ -42,7 +42,7 @@ python3 dev/v1/v1.py stop
 ## 隔离核查
 
 - 开发 project 为 `haxpower-v1-dev`，站点为 `haxpower-v1-dev.localhost`，数据库及其站点用户为 `hpv1_dev`。每个 CI job 从 run ID 与 attempt 派生 project、站点和用户。管理服务的 DB 路由固定为内部 `mariadb:3306`。
-- `<project>_bench-data` 保存 Bench、虚拟环境、站点文件和日志。`<project>_db-data` 保存数据库，`<project>_queue-data` 保存专有 Redis queue。Redis cache 使用临时存储。数据库和 Redis 仅在项目内部网络，只有管理用 Bench 另接项目专用依赖下载网络。
+- `<project>_bench-data` 保存 Bench、虚拟环境、站点文件和日志。`<project>_db-data` 保存数据库，`<project>_queue-data` 保存专有 Redis queue。Redis cache 使用临时存储。数据库和 Redis 仅在项目内部网络，管理用 Bench 另接项目专用依赖下载网络。Web 与 Socket.IO 另接专用前端桥接网络，用于向宿主回环地址发布端口。
 - 预检先核对渲染后的服务、挂载、镜像、DB/站点身份、项目资源标签和所属源码根，再检查回环地址和端口。运行态核查要求上游检出干净，正式 App 的 Python import 与 editable 安装来源均指向项目 Bench 内的正式副本。已有站点上检查实际数据库及账户、Hooks、模块和 DocType。
 - 开发和实验的只读对照可运行以下命令。输出应显示不同的容器、网络、卷和挂载根。
 
