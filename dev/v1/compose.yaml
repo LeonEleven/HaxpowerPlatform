@@ -1,0 +1,147 @@
+name: ${HP_V1_PROJECT}
+
+x-owner: &owner
+  org.haxpower.v1.checkout: ${HP_V1_OWNER}
+
+x-bench: &bench
+  image: ${HP_V1_BENCH_IMAGE}
+  platform: linux/amd64
+  labels: *owner
+  init: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  entrypoint: []
+  user: "1000:1000"
+  working_dir: /bench/work
+  environment:
+    HP_V1_PROJECT: ${HP_V1_PROJECT}
+    HP_V1_SITE: ${HP_V1_SITE}
+    HP_V1_DB: ${HP_V1_DB}
+    HP_V1_WEB_PORT: ${HP_V1_WEB_PORT}
+    HP_V1_SOCKET_PORT: ${HP_V1_SOCKET_PORT}
+    PYTHONDONTWRITEBYTECODE: "1"
+  volumes:
+    - bench-data:/bench
+    - type: bind
+      source: ${HP_V1_SOURCE}
+      target: /source/haxpower_v1
+      read_only: true
+      bind: {create_host_path: false}
+    - type: bind
+      source: ${HP_V1_CONTAINER}
+      target: /opt/hp-v1
+      read_only: true
+      bind: {create_host_path: false}
+    - type: bind
+      source: ${HP_V1_LOCK}
+      target: /opt/versions.lock.json
+      read_only: true
+      bind: {create_host_path: false}
+  networks: [backend]
+  depends_on:
+    mariadb: {condition: service_healthy}
+    redis-cache: {condition: service_healthy}
+    redis-queue: {condition: service_healthy}
+
+services:
+  volume-init:
+    profiles: [setup]
+    image: ${HP_V1_BENCH_IMAGE}
+    platform: linux/amd64
+    labels: *owner
+    user: "0:0"
+    network_mode: none
+    cap_drop: [ALL]
+    cap_add: [CHOWN]
+    security_opt: [no-new-privileges:true]
+    command: [install, -d, -o, "1000", -g, "1000", -m, "0700", /bench/work]
+    volumes: [bench-data:/bench]
+
+  bench:
+    <<: *bench
+    command: [sleep, infinity]
+    networks:
+      backend: {}
+      egress: {gw_priority: 1}
+    secrets: [db-root, site-admin]
+
+  web:
+    <<: *bench
+    profiles: [runtime]
+    networks:
+      backend: {}
+      frontend: {gw_priority: 1}
+    command: [python, /opt/hp-v1/bench.py, web]
+    ports: ["127.0.0.1:${HP_V1_WEB_PORT}:${HP_V1_WEB_PORT}"]
+
+  socketio:
+    <<: *bench
+    profiles: [runtime]
+    networks:
+      backend: {}
+      frontend: {gw_priority: 1}
+    command: [python, /opt/hp-v1/bench.py, socketio]
+    ports: ["127.0.0.1:${HP_V1_SOCKET_PORT}:${HP_V1_SOCKET_PORT}"]
+
+  worker:
+    <<: *bench
+    profiles: [runtime]
+    command: [python, /opt/hp-v1/bench.py, worker]
+
+  scheduler:
+    <<: *bench
+    profiles: [runtime]
+    command: [python, /opt/hp-v1/bench.py, scheduler]
+
+  mariadb:
+    image: ${HP_V1_MARIADB_IMAGE}
+    platform: linux/amd64
+    labels: *owner
+    command: [--character-set-server=utf8mb4, --collation-server=utf8mb4_unicode_ci, --skip-character-set-client-handshake, --innodb-snapshot-isolation=OFF]
+    environment:
+      MARIADB_ROOT_PASSWORD_FILE: /run/secrets/db-root
+      MARIADB_ROOT_HOST: "%"
+    secrets: [db-root]
+    volumes: [db-data:/var/lib/mysql]
+    networks: [backend]
+    healthcheck:
+      test: [CMD, healthcheck.sh, --connect, --innodb_initialized]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+
+  redis-cache:
+    image: ${HP_V1_REDIS_IMAGE}
+    platform: linux/amd64
+    labels: *owner
+    command: [redis-server, --save, "", --appendonly, "no", --maxmemory, 128mb, --maxmemory-policy, allkeys-lru, --protected-mode, "no"]
+    tmpfs: [/data]
+    networks: [backend]
+    healthcheck: &redis-health
+      test: [CMD, redis-cli, ping]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis-queue:
+    image: ${HP_V1_REDIS_IMAGE}
+    platform: linux/amd64
+    labels: *owner
+    command: [redis-server, --save, "", --appendonly, "yes", --maxmemory, 128mb, --maxmemory-policy, noeviction, --protected-mode, "no"]
+    volumes: [queue-data:/data]
+    networks: [backend]
+    healthcheck: *redis-health
+
+secrets:
+  db-root: {file: "${HP_V1_SECRET_DIR}/db-root"}
+  site-admin: {file: "${HP_V1_SECRET_DIR}/site-admin"}
+
+networks:
+  backend: {internal: true, labels: *owner}
+  egress: {driver: bridge, labels: *owner}
+  frontend: {driver: bridge, labels: *owner}
+
+volumes:
+  bench-data: {labels: *owner}
+  db-data: {labels: *owner}
+  queue-data: {labels: *owner}

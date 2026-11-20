@@ -1,0 +1,14 @@
+[build-system]
+requires = ["flit_core>=3.11,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "haxpower_v1"
+version = "0.2.0"
+description = "HaxpowerPlatform V1 Frappe application"
+requires-python = ">=3.14,<3.15"
+authors = [{name = "HaxpowerPlatform"}]
+
+[tool.bench.frappe-dependencies]
+frappe = ">=16.55.0,<17"
+erpnext = ">=16.55.0,<17"

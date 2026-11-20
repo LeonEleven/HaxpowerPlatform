@@ -36,9 +36,9 @@ flowchart TB
 
 前端只调用 API。库存服务负责业务校验和事务，不允许前端直接写数据库。
 
-## 4. 技术路线候选
+## 4. 技术路线
 
-### A. ERPNext + HaxpowerPlatform 自定义 Frappe App
+### A. V1 实施基线 · ERPNext v16 + HaxpowerPlatform Frappe App
 
 - 复用 ERPNext Item、Warehouse、Batch、Stock Entry、Stock Ledger
   等能力。
@@ -61,11 +61,13 @@ flowchart TB
 
 ## 5. 解耦策略
 
-如果验证 ERPNext： - 建立独立 `haxpower_platform` Frappe App。 - 建立
-HaxpowerPlatform 领域服务和 API facade。 - 将 ERPNext 标准库存操作封装在
-Adapter 中。 - 公共 API 不直接返回 ERPNext 原始 DocType 结构。 -
-不直接写 ERPNext Stock Ledger Entry、Bin、Batch Bundle 等底层记录。 -
-不通过修改核心源码实现业务。 - 对 ERPNext 升级建立回归测试。
+正式 App 的发行名、Frappe App 名和 Python 包名统一为 `haxpower_v1`。源码位于
+[apps/haxpower_v1](../apps/haxpower_v1)，开发和 CI 独立安装并锁定上游依赖。
+[开发入口与迁移说明](../dev/v1/README.md)
+
+- HaxpowerPlatform 领域服务和 API facade 通过 Adapter 调用 ERPNext 标准库存操作。
+- 公共 API 边界封装 ERPNext 内部 DocType。库存适配层通过原生单据和受支持接口读写，保留 ERPNext 核心源码原样。
+- ERPNext 升级纳入回归验证。V1-01 的迁移测试覆盖空站安装、补丁重放及合成版本恢复。
 
 领域模型使用自己的稳定
 ID、SKU、批次选择模式、库存位置和单据状态；适配层负责映射到 ERPNext。

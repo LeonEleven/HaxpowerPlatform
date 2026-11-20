@@ -73,15 +73,15 @@ B01–B12 均待确认。盘点冻结与截止、预留需求、留存、切换�
 
 - GitHub 的 `LeonEleven/HaxpowerPlatform` 为唯一协作代码仓库。正式 App 源码、版本锁、配置模板和测试由本仓库管理；Frappe 和 ERPNext 上游源码由独立 Bench 或构建依赖获取。
 - `dev/erpnext-lab/` 是技术实验，含已命名为 `haxpower_platform` 的原型。保留该原型、历史实验站点及 Frappe-only 对照。已有实验代码和脱敏证据用于复核，正式代码按业务契约独立实现。
-- 正式 App 暂定名 `haxpower_v1`，源码计划放在 `apps/haxpower_v1/`，正式开发环境计划由 `dev/v1/` 管理。正式开发与 CI 使用独立 Bench、Python 环境、站点、数据库、Redis、worker、网络和卷，端口与实验环境隔离。
-- 锁定上游版本、提交和镜像摘要，验证从干净工作区可重复安装和迁移。Stage 2B 的 Frappe/ERPNext 16.55.0、MariaDB 11.8.9 仅为首轮验证参考。V1-01 验证正式锁定组合。
+- 正式 App 为 `haxpower_v1`，源码位于 `apps/haxpower_v1/`，正式开发环境由 `dev/v1/` 管理。正式开发与 CI 使用独立 Bench、Python 环境、站点、数据库、Redis、worker、网络和卷，端口与实验环境隔离。
+- V1-01 的版本锁记录了 Frappe/ERPNext v16.55.0 的官方 tag 和对应提交、MariaDB 11.8.9 及 Redis 7.4.12 的镜像摘要和 Bench 工具。依据本节的本地与 CI 证据核对安装及迁移。
 - 禁止将实验数据、数据库、密钥或站点凭据复制到正式环境。历史报告中的本地目录、站点名和端口均为该次开发参考，具体机器以其配置为准。
 
-[实验目录](../dev/erpnext-lab/README.md) · [正式隔离方案](V1-IMPLEMENTATION-PLAN.md#2-正式工程隔离和迁移)
+[正式开发说明](../dev/v1/README.md) · [版本锁](../dev/v1/versions.lock.json) · [实验目录](../dev/erpnext-lab/README.md) · [正式隔离方案](V1-IMPLEMENTATION-PLAN.md#2-正式工程隔离和迁移)
 
 ## 6. 当前项目进度
 
-**状态快照，2026-11-20（Asia/Shanghai）。** 本补充任务开始时，GitHub 显示 PR #12 已合并至 `main`，远端主线为 `3e2f2c1`；承载 Stage 3A 规划的 PR #13 为打开的 Draft，源分支为 `docs/v1-implementation-baseline`。正式开发尚未开始。后续会话须重新核对 GitHub 和远端主线。
+**状态快照，2026-11-20（Asia/Shanghai）。** 开工时 GitHub 确认 Stage 3A PR #13 已合并，重新 fetch 后的 `origin/main` 为 `3908c9aec0c5eda1d3f0d41c4ee18a70074b3038`。V1-01 的 Draft PR #14 在 `feat/v1-01-bootstrap` 实现正式 App、独立 Compose、合成迁移演练及 PR CI。
 
 | 文档 | 当前范围 |
 | --- | --- |
@@ -89,11 +89,14 @@ B01–B12 均待确认。盘点冻结与截止、预留需求、留存、切换�
 | [验收清单](V1-ACCEPTANCE-CHECKLIST.md) | A01 至 A19，共 19 项待正式验收。 |
 | [生产就绪差距](PRODUCTION-READINESS-GAPS.md) | G01 至 G12 待关闭，B01 至 B12 待业务确认。 |
 
-下一项正式开发为 **V1-01**。Stage 3A 审查完成后，建立独立 App 骨架及开发环境、CI、测试框架和可重复数据库迁移，使用合成夹具验证空站安装、重复迁移和前版本升级。这项任务的范围是工程基线。
+- **A01 本地证据。** WSL2 的 Docker 启动正式项目并核对镜像、上游提交、导入来源及现场数据库用户 `hpv1_dev`。11 项预检测试在 Python 正常和优化模式通过，并实测占用端口、实验项目和站点覆盖被拒绝。第二个工作区独立准备同一套锁定依赖。开发站通过 Web 和 Socket.IO 回环烟测及非法 Host 拒绝检查，worker 和 scheduler 实际运行。
+- **A02 本地证据。** `haxpower-v1-dev.localhost` 从空站实际安装 ERPNext 与 `haxpower_v1`，两次 `bench migrate` 和 2 项 Frappe 集成测试完成。第二工作区空站安装及重复迁移通过，按表结构、样例记录和补丁日志比较的 SHA-256 均为 `3925938fe7bf3e3791781b8928b3f7f8f217af8a5dd5d674acd1256ae4c918fb`。另一个隔离站点从合成 0.1.0 升级，实测后置补丁失败时新增列和已提交补丁仍在。恢复数据库、站点配置和公私文件后，样例与故障前摘要 `b79dd23bf89309cd0e95c0699dc412d348855c14f124938b91a8466c39998e6f` 一致。重试并复跑后，1 条既有记录和 1 条补丁日志的摘要保持 `efffda3c97d7dafb67a6b08f97e8276a54b1a60b0a398334111af84301b3b8ee`。本地临时项目经归属校验完成清理，实验容器、网络和卷与启动前快照一致。
+
+下一任务为 **V1-02 分类、属性与规格**。本地工程验证已完成，开始前结合 PR #14 最新提交的真实 CI 结果完成 V1-01 审查。A01/A02 和 G01 的发布候选验收由 V1-20 继续复核，B01–B12 保持待确认。
 
 每次完成重要开发阶段时更新此节，记录日期、对应 PR 或提交、实际完成范围、验收证据、未决项及下一任务。PR 状态是带日期的核对结果，下一会话重新查询。
 
-[V1-01](V1-DEVELOPMENT-BACKLOG.md#v1-01-正式-app-骨架及开发基线) · [PR #12](https://github.com/LeonEleven/HaxpowerPlatform/pull/12) · [PR #13](https://github.com/LeonEleven/HaxpowerPlatform/pull/13)
+[V1-01](V1-DEVELOPMENT-BACKLOG.md#v1-01-正式-app-骨架及开发基线) · [Draft PR #14 及验收证据](https://github.com/LeonEleven/HaxpowerPlatform/pull/14) · [PR #14 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/14/checks) · [PR #13](https://github.com/LeonEleven/HaxpowerPlatform/pull/13)
 
 ## 7. 不可破坏的技术约束
 
