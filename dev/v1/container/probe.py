@@ -41,7 +41,12 @@ def snapshot():
     rows = frappe.get_all(DOCTYPE, fields=fields, order_by="name")
     logs = frappe.get_all("Patch Log", filters={"patch": ["in", [PATCH, FAULT_PATCH]]},
                           fields=["name", "patch", "skipped", "creation"], order_by="name")
-    return {"schema": schema, "rows": rows, "patches": logs}
+    catalog = {}
+    if frappe.db.table_exists("HP V1 Product Specification"):
+        from catalog_probe import snapshot as catalog_snapshot
+
+        catalog = catalog_snapshot()
+    return {"schema": schema, "rows": rows, "patches": logs, "catalog": catalog}
 
 
 def main(action, site):
@@ -59,6 +64,14 @@ def main(action, site):
                 ignore_permissions=True
             )
             frappe.db.commit()
+        elif action == "seed-catalog":
+            from catalog_probe import seed
+
+            seed()
+        elif action == "catalog-permissions":
+            from catalog_probe import verify_native_denials
+
+            verify_native_denials(site)
         else:
             raise ValueError("unknown probe action")
     finally:

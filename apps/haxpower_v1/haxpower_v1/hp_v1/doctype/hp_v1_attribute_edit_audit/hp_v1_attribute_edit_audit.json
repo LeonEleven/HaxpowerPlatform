@@ -1,0 +1,84 @@
+{
+ "doctype": "DocType",
+ "name": "HP V1 Attribute Edit Audit",
+ "module": "HP V1",
+ "engine": "InnoDB",
+ "field_order": [
+  "specification",
+  "attribute",
+  "before_values",
+  "after_values",
+  "actor",
+  "occurred_at",
+  "operation_id",
+  "specification_revision"
+ ],
+ "fields": [
+  {
+   "fieldname": "specification",
+   "label": "Specification",
+   "fieldtype": "Link",
+   "options": "HP V1 Product Specification",
+   "reqd": 1,
+   "search_index": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "attribute",
+   "label": "Attribute",
+   "fieldtype": "Link",
+   "options": "HP V1 Attribute Definition",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "before_values",
+   "label": "Before Values",
+   "fieldtype": "Code",
+   "options": "JSON",
+   "reqd": 1
+  },
+  {
+   "fieldname": "after_values",
+   "label": "After Values",
+   "fieldtype": "Code",
+   "options": "JSON",
+   "reqd": 1
+  },
+  {
+   "fieldname": "actor",
+   "label": "Actor",
+   "fieldtype": "Data",
+   "reqd": 1
+  },
+  {
+   "fieldname": "occurred_at",
+   "label": "Occurred At",
+   "fieldtype": "Datetime",
+   "reqd": 1
+  },
+  {
+   "fieldname": "operation_id",
+   "label": "Operation ID",
+   "fieldtype": "Data",
+   "reqd": 1,
+   "search_index": 1,
+   "length": 36
+  },
+  {
+   "fieldname": "specification_revision",
+   "label": "Specification Revision",
+   "fieldtype": "Int",
+   "reqd": 1,
+   "non_negative": 1
+  }
+ ],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1
+  }
+ ]
+}

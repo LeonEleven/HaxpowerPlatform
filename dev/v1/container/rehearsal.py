@@ -3,9 +3,11 @@
 from hashlib import sha256
 import json
 import os
+import subprocess
+import sys
 
 from bench import (BENCH, PROJECT, PYTHON, SITE, SITES, UPGRADE, check_bench, check_installed,
-                   check_targets, create_site, deploy_app, require, run, site_command, test_site)
+                   check_targets, create_site, deploy_app, redact, require, run, site_command, test_site)
 
 
 PATCH = "haxpower_v1.patches.backfill_migration_sample"
@@ -13,8 +15,15 @@ FIXTURE_VERSION = "0.1.0"
 
 
 def inspect(action, target):
-    output = run(PYTHON, "/opt/hp-v1/probe.py", action, target, cwd=SITES, capture=True)
-    return json.loads(output) if action == "snapshot" else None
+    try:
+        output = run(PYTHON, "/opt/hp-v1/probe.py", action, target, cwd=SITES, capture=True)
+    except subprocess.CalledProcessError as error:
+        print(redact((error.stdout or "") + (error.stderr or "")), file=sys.stderr, flush=True)
+        raise
+    if action == "snapshot":
+        return json.loads(output)
+    if output:
+        print(output.strip(), flush=True)
 
 
 def install(target):
@@ -26,8 +35,14 @@ def install(target):
 
 def record(label, snapshot):
     digest = sha256(json.dumps(snapshot, sort_keys=True).encode()).hexdigest()
+    catalog_rows = sum(len(table["rows"]) for table in snapshot["catalog"].values())
     print(f"{label}: sha256={digest} rows={len(snapshot['rows'])} "
-          f"patch_records={len(snapshot['patches'])}", flush=True)
+          f"patch_records={len(snapshot['patches'])} catalog_rows={catalog_rows}", flush=True)
+
+
+def verify_catalog_schema(state):
+    require(len(state["catalog"]) == 7 and all(table and not table["rows"] for table in state["catalog"].values()),
+            "catalog schema missing or automatically seeded")
 
 
 def repeat_migration(target, snapshot):
@@ -43,6 +58,7 @@ def verify_upgraded(state, before):
     require("baseline_revision" in state["schema"], "new column missing after migration")
     require([(patch["patch"], patch["skipped"]) for patch in state["patches"]] == [(PATCH, 0)],
             "unexpected completed patch history")
+    verify_catalog_schema(state)
 
 
 def recovery_point():
@@ -70,6 +86,7 @@ def integration():
     clean = inspect("snapshot", SITE)
     require(not clean["rows"] and len(clean["patches"]) == 1 and "baseline_revision" in clean["schema"],
             "unexpected clean baseline")
+    verify_catalog_schema(clean)
     record("clean install and first migration", clean)
     repeat_migration(SITE, clean)
 
@@ -80,7 +97,7 @@ def integration():
         install(UPGRADE)
         inspect("seed", UPGRADE)
         previous = inspect("snapshot", UPGRADE)
-        require(len(previous["rows"]) == 1 and not previous["patches"]
+        require(len(previous["rows"]) == 1 and not previous["patches"] and not previous["catalog"]
                 and "baseline_revision" not in previous["schema"], "unexpected previous fixture state")
         record(f"synthetic previous release {FIXTURE_VERSION}", previous)
 
@@ -121,6 +138,13 @@ def integration():
     upgraded = inspect("snapshot", UPGRADE)
     verify_upgraded(upgraded, previous)
     record("upgrade recovered and synthetic record preserved", upgraded)
-    repeat_migration(UPGRADE, upgraded)
+    inspect("seed-catalog", UPGRADE)
+    inspect("catalog-permissions", UPGRADE)
+    populated = inspect("snapshot", UPGRADE)
+    require(sum(len(table["rows"]) for table in populated["catalog"].values()) == 9,
+            "unexpected synthetic catalog migration fixture")
+    record("upgraded site with synthetic specification, inactive option and audit", populated)
+    repeat_migration(UPGRADE, populated)
+    repeat_migration(UPGRADE, populated)
     check_installed(UPGRADE)
     require(inspect("snapshot", SITE) == clean, "upgrade rehearsal changed the clean-install site")

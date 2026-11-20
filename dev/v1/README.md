@@ -1,6 +1,6 @@
 # HaxpowerPlatform V1 开发环境
 
-正式发行包、Frappe App 和 Python import 均为 `haxpower_v1`，界面名为 HaxpowerPlatform。源代码位于 [apps/haxpower_v1](../../apps/haxpower_v1)。这个环境承载 V1-01 的工程骨架和合成迁移样例。它可与 ERPNext 技术实验及 Frappe-only Spike 并行使用。
+正式发行包、Frappe App 和 Python import 均为 `haxpower_v1`，界面名为 HaxpowerPlatform。源代码位于 [apps/haxpower_v1](../../apps/haxpower_v1)。这个环境支持 V1-01 工程骨架、合成迁移演练及 V1-02 规格服务测试。它可与 ERPNext 技术实验及 Frappe-only Spike 并行使用。
 
 ## 启动条件与版本
 
@@ -13,7 +13,7 @@
 ```bash
 git clone https://github.com/LeonEleven/HaxpowerPlatform.git
 cd HaxpowerPlatform
-git switch --track origin/feat/v1-01-bootstrap  # V1-01 审查期间从任务分支复现
+# 复现审查中的改动时，先切换到该 PR 的任务分支。
 
 python3 -m unittest discover -s dev/v1 -v
 python3 dev/v1/v1.py config
@@ -63,6 +63,16 @@ Compose、预检和运行态站点校验均能拒绝其他身份。测试覆盖�
 [V1 工程 CI](../../.github/workflows/v1-engineering.yml) 对面向 `main` 的 PR 从干净检出创建两个全新站点。第一个安装当前版本、运行 Frappe 测试和两次真实 `bench migrate`，比较样例表结构、记录及补丁日志。第二个安装保存在 [夹具目录](container/fixtures/app-0.1.0) 的合成前版本 0.1.0，保留一个带稳定 ID 的样例和公有、私有文件。建一致备份后启用故障补丁，验证 migrate 返回失败并定位补丁。此时新增列及此前成功的补丁已经提交，注入补丁尝试的数据修改未提交。
 
 恢复时回到同一合成前版本，使用同一备份集还原数据库、站点配置和文件，逐项与故障前核对。再用当前版本重试迁移，核对样例 ID、文本、创建及修改时间和补丁记录，复跑迁移并校验第一个站点的样例状态。CI 日志记录数据库和版本身份、各阶段状态的 SHA-256、脱敏诊断和回环访问结果。
+
+V1-02 在上述流程中自动运行 [规格层 Frappe 集成测试](../../apps/haxpower_v1/haxpower_v1/catalog/test_catalog.py)。恢复后的升级站由合成探针显式建立分类、模板、规格、停用选项及审计，用真实员工会话验证原生 HTTP 写入被拒绝且数据无副作用，再两次运行 migrate 并比较七张目录表的结构、记录和引用。App 的 Bench 副本与当前 checkout 按文件内容核对，检查通过后才运行集成及站点命令。测试记录由临时站点生命周期管理，安装和迁移钩子只建立结构及工程角色。
+
+### 规格层内部维护
+
+已认证的工程调用方通过 `haxpower_v1.catalog.service` 和 `catalog.dto` 创建或编辑配置及规格。使用 `save_category`、`save_attribute`、`save_option`、`save_template`，编辑时带原记录 ID。使用 `create_specification`、`edit_specification`、`get_specification` 和 `get_specification_audit` 维护规格。属性输入按属性 ID 映射到值序列，单选和多选的元素均使用选项 ID。编辑需传读到的 `expected_revision`。维护角色 `HP V1 Catalog Maintainer` 需管理员显式授予，B01 和 B02 确认后由项目组集成真实模板和业务授权。
+
+[规格层数据与值语义](../../docs/PRODUCT-MODEL.md#12-v1-02-规格层实现) · [权限和事务](../../docs/TECHNICAL-DESIGN.md#v1-02-规格维护与事务)
+
+### 本机复现 CI
 
 本机也可用独立临时项目运行同一演练。只为新演练选用不同的正整数运行号，`ci-clean` 按项目及检出归属核查并删除这次演练的站点和卷。
 

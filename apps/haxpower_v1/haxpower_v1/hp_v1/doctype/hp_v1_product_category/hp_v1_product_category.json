@@ -1,0 +1,68 @@
+{
+ "doctype": "DocType",
+ "name": "HP V1 Product Category",
+ "module": "HP V1",
+ "engine": "InnoDB",
+ "field_order": [
+  "code",
+  "display_name",
+  "parent_category",
+  "description",
+  "status",
+  "sort_order"
+ ],
+ "fields": [
+  {
+   "fieldname": "code",
+   "label": "Code",
+   "fieldtype": "Data",
+   "reqd": 1,
+   "unique": 1,
+   "in_list_view": 1,
+   "length": 100
+  },
+  {
+   "fieldname": "display_name",
+   "label": "Display Name",
+   "fieldtype": "Data",
+   "reqd": 1,
+   "in_list_view": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "parent_category",
+   "label": "Parent Category",
+   "fieldtype": "Link",
+   "options": "HP V1 Product Category"
+  },
+  {
+   "fieldname": "description",
+   "label": "Description",
+   "fieldtype": "Small Text"
+  },
+  {
+   "fieldname": "status",
+   "label": "Status",
+   "fieldtype": "Select",
+   "options": "Active\nInactive",
+   "default": "Active",
+   "reqd": 1
+  },
+  {
+   "fieldname": "sort_order",
+   "label": "Sort Order",
+   "fieldtype": "Int",
+   "default": "0",
+   "non_negative": 1
+  }
+ ],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1
+  }
+ ],
+ "title_field": "display_name"
+}
