@@ -53,13 +53,19 @@ DocType/ERPNext 标准对象；若独立自研，再按数据库生成 DDL。
 
 ### warehouses
 
-`id PK, code UNIQUE, name, warehouse_type(PHYSICAL/TRANSIT), status, is_system_managed`
+逻辑模型由 `HP V1 Warehouse` 实现。Frappe 的 `name` 保存 32 位随机十六进制领域 ID。
+
+`id PK, company, code, display_name, description, native_parent, kind(Physical/Transit), status, revision`
+
+`(company, code)` 设数据库唯一键。编码格式用于候选工程，正式编码见 B02。`company` 链接 ERPNext Company，`native_parent` 链接同公司已启用的顶层分组仓。
 
 ### warehouse_locations
 
-`id PK, warehouse_id FK, code, name, status, is_system_managed`
+逻辑模型由 `HP V1 Warehouse Location` 实现，使用同样形式的独立领域 ID。
 
-建议唯一约束：`warehouse_id + code`。
+`id PK, warehouse Link (必填), code, display_name, description, status, native_warehouse UNIQUE, revision`
+
+`(warehouse, code)` 设数据库联合唯一键，`native_warehouse` 设数据库唯一键。每条库位记录必须关联一个领域仓库，其公司与系统类型从该仓库继承。`Warehouse.custom_hp_v1_location_id` 保存受保护的反向标记。维护服务用当前读和事务锁验证双向关联、叶仓公司及原生树边界。
 
 ### units_of_measure
 

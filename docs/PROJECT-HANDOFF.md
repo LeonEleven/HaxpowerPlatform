@@ -81,7 +81,7 @@ B01–B12 均待确认。盘点冻结与截止、预留需求、留存、切换�
 
 ## 6. 当前项目进度
 
-**状态快照，2026-11-20（Asia/Shanghai）。** V1-01 PR #14 和 V1-02 PR #15 已合并。V1-03 从 PR #15 的合并提交 `a76c508136deee7827f55ab862b4986ca751e244` 开始，在 Draft PR #16 交付品牌档案、独立 SKU 和与 ERPNext Item/UOM 的受控映射，待架构评审。
+**状态快照，2026-11-20（Asia/Shanghai）。** V1-01 PR #14、V1-02 PR #15 和 V1-03 PR #16 已合并。V1-03 交付品牌档案、独立 SKU 和 ERPNext Item/UOM 映射。V1-04 从 PR #16 的合并提交 `65e1992bed4a5ddaaf19d2096449ecf2b138055e` 开始，在 `feat/v1-04-warehouse-location-mapping` 交付仓库、库位和原生叶仓映射。
 
 | 文档 | 当前范围 |
 | --- | --- |
@@ -98,11 +98,13 @@ B01–B12 均待确认。盘点冻结与截止、预留需求、留存、切换�
 
 V1-03 沿用 `catalog.service.get_specification(specification_id)` 的稳定 ID 和维护权限。A03 的授权库存摘要与带批次的 SKU 独立扣减由后续库存、V1-15 和 V1-20 衔接。B01 的真实模板、无品牌建档、单位精度和数量上限，以及 B02 的员工字段和仓库范围继续待确认。SKU 停用保持阻断，待 V1-07/V1-09 接入完整库存引用和写入协调。
 
-V1-03 架构评审后，按 Backlog 推进 **V1-04 仓库与库位映射**，随后由 V1-05 接入仓库与员工授权。
+V1-04 的仓库和库位使用稳定 ID。每个库位独占同公司 ERPNext 原生叶仓，系统在途单独配置并从普通选择中排除。停用保持安全拒绝，等待库存引用及写入协调。B02 仍待确认。V1-04 通过评审后，下一项为 **V1-05 仓库授权和原生入口守卫**。在途发出、接收、部分接收与退回由 V1-10/V1-11 接入。
+
+[V1-04 Backlog](V1-DEVELOPMENT-BACKLOG.md#v1-04-仓库与库位映射) · [V1-04 技术设计](TECHNICAL-DESIGN.md#v1-04-仓库库位与原生叶仓)
 
 每次完成重要开发阶段时更新此节，记录日期、对应 PR 或提交、实际完成范围、验收证据、未决项及下一任务。PR 状态是带日期的核对结果，下一会话重新查询。
 
-[V1-03](V1-DEVELOPMENT-BACKLOG.md#v1-03-品牌-sku-与原生-item-映射) · [V1-03 Draft PR #16](https://github.com/LeonEleven/HaxpowerPlatform/pull/16) · [PR #16 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/16/checks) · [V1-02 PR #15](https://github.com/LeonEleven/HaxpowerPlatform/pull/15) · [PR #15 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/15/checks) · [V1-01 PR #14](https://github.com/LeonEleven/HaxpowerPlatform/pull/14) · [PR #14 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/14/checks)
+[V1-03](V1-DEVELOPMENT-BACKLOG.md#v1-03-品牌-sku-与原生-item-映射) · [V1-03 PR #16](https://github.com/LeonEleven/HaxpowerPlatform/pull/16) · [PR #16 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/16/checks) · [V1-02 PR #15](https://github.com/LeonEleven/HaxpowerPlatform/pull/15) · [PR #15 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/15/checks) · [V1-01 PR #14](https://github.com/LeonEleven/HaxpowerPlatform/pull/14) · [PR #14 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/14/checks)
 
 ## 7. 不可破坏的技术约束
 
