@@ -11,7 +11,7 @@ from hashlib import sha256
 import frappe
 from frappe.utils import get_datetime
 
-from haxpower_platform import audit_fixtures as fixtures, transit
+from haxpower_platform import audit_fixtures as fixtures, lightweight_fixtures, transit
 from haxpower_platform.integrity import quantity_for, validate_count_ledger
 from haxpower_platform.stock import SITE, SERVICE_WRITE, batch_key, find_batch, parse_selection, post_entry, require_warehouse
 
@@ -63,17 +63,21 @@ def protect_stock(doc, method=None):
 def protect_repost(doc, method=None):
     if frappe.local.site != SITE or not doc.recreate_stock_ledgers:
         return
-    if (doc.company == fixtures.COMPANY or doc.item_code in fixtures.ITEMS.values()
-            or (doc.voucher_type in ("Stock Entry", "Stock Reconciliation") and doc.voucher_no
-                and frappe.db.get_value(doc.voucher_type, doc.voucher_no, "company") == fixtures.COMPANY)):
+    protected = (fixtures, lightweight_fixtures)
+    voucher_company = (
+        frappe.db.get_value(doc.voucher_type, doc.voucher_no, "company")
+        if doc.voucher_type in ("Stock Entry", "Stock Reconciliation") and doc.voucher_no else None
+    )
+    if any(doc.company == scope.COMPANY or voucher_company == scope.COMPANY or doc.item_code in scope.ITEMS.values()
+           for scope in protected):
         frappe.throw("STAGE1F_RECREATE_LEDGER_DENIED", frappe.PermissionError)
 
 
 def protect_deletion(doc, method=None):
     if frappe.local.site != SITE:
         return
-    if doc.company == fixtures.COMPANY or any(
-        row.doctype_name in (EVENT, TASK) for row in doc.doctypes_to_delete
+    if doc.company in (fixtures.COMPANY, lightweight_fixtures.COMPANY) or any(
+        row.doctype_name in (EVENT, TASK, lightweight_fixtures.LOG) for row in doc.doctypes_to_delete
     ):
         frappe.throw("STAGE1F_BULK_DELETE_DENIED", frappe.PermissionError)
 
@@ -293,17 +297,17 @@ def create_count(sku, location, batchSelection, requestId):
     return {"taskId": key, "batch": number, "baseline": str(int(task.baseline)), "version": task.ledger_version}
 
 
-def reconcile_count(task, previous, measured):
-    batch, warehouse = task.batch_key, LOCATIONS[task.location]
+def reconcile_count(task, previous, measured, *, scope=fixtures):
+    batch, warehouse = task.batch_key, scope.LOCATIONS[task.location]
     now = get_datetime()
     bundle = frappe.get_doc({
-        "doctype": "Serial and Batch Bundle", "company": fixtures.COMPANY, "item_code": task.item_code,
+        "doctype": "Serial and Batch Bundle", "company": scope.COMPANY, "item_code": task.item_code,
         "warehouse": warehouse, "posting_datetime": now, "voucher_type": "Stock Reconciliation",
         "type_of_transaction": "Outward",
         "entries": [{"batch_no": batch, "qty": -int(previous), "warehouse": warehouse}],
     }).insert(ignore_permissions=True)
     doc = frappe.get_doc({
-        "doctype": "Stock Reconciliation", "company": fixtures.COMPANY, "purpose": "Stock Reconciliation",
+        "doctype": "Stock Reconciliation", "company": scope.COMPANY, "purpose": "Stock Reconciliation",
         "posting_date": now.date(), "posting_time": now.time(), "set_posting_time": 1,
         "items": [{"item_code": task.item_code, "warehouse": warehouse, "batch_no": batch, "qty": int(measured),
                    "current_qty": int(previous), "current_serial_and_batch_bundle": bundle.name,
