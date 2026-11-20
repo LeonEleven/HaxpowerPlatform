@@ -43,7 +43,7 @@ jobs:
             python3 dev/v1/v1.py preflight
           } 2>&1 | tee "$RUNNER_TEMP/hp-v1-evidence/preflight.log"
 
-      - name: Install locked dependencies and rehearse real migrations
+      - name: Test catalog and rehearse migrations with locked dependencies
         run: |
           {
             python3 dev/v1/v1.py up

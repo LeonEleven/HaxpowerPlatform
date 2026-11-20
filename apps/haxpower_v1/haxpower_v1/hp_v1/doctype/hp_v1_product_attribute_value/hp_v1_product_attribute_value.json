@@ -1,0 +1,69 @@
+{
+ "doctype": "DocType",
+ "name": "HP V1 Product Attribute Value",
+ "module": "HP V1",
+ "engine": "InnoDB",
+ "field_order": [
+  "attribute",
+  "data_type",
+  "value_text",
+  "value_decimal",
+  "value_boolean",
+  "value_date",
+  "option_id",
+  "option_key"
+ ],
+ "fields": [
+  {
+   "fieldname": "attribute",
+   "label": "Attribute",
+   "fieldtype": "Link",
+   "options": "HP V1 Attribute Definition",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "data_type",
+   "label": "Data Type",
+   "fieldtype": "Select",
+   "reqd": 1,
+   "options": "TEXT\nDECIMAL\nBOOLEAN\nDATE\nSINGLE_SELECT\nMULTI_SELECT"
+  },
+  {
+   "fieldname": "value_text",
+   "label": "Text Value",
+   "fieldtype": "Code"
+  },
+  {
+   "fieldname": "value_decimal",
+   "label": "Exact Decimal Value",
+   "fieldtype": "Data",
+   "length": 140
+  },
+  {
+   "fieldname": "value_boolean",
+   "label": "Boolean Value",
+   "fieldtype": "Select",
+   "options": "\nFALSE\nTRUE"
+  },
+  {
+   "fieldname": "value_date",
+   "label": "Date Value",
+   "fieldtype": "Date"
+  },
+  {
+   "fieldname": "option_id",
+   "label": "Option",
+   "fieldtype": "Link",
+   "options": "HP V1 Attribute Option"
+  },
+  {
+   "fieldname": "option_key",
+   "label": "Option Key",
+   "fieldtype": "Data",
+   "length": 100
+  }
+ ],
+ "allow_rename": 0,
+ "istable": 1
+}

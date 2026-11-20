@@ -10,7 +10,7 @@ SKU、多仓库/库位、可空批次、库存流水、移库在途、可配置�
 
 ## 开发入口
 
-V1-01 提供 [正式 App 源码](apps/haxpower_v1)、[独立开发环境与迁移说明](dev/v1/README.md) 和 [V1 工程 CI](.github/workflows/v1-engineering.yml)。
+正式工程提供 [App 源码](apps/haxpower_v1)、[独立开发环境与迁移说明](dev/v1/README.md) 和 [V1 工程 CI](.github/workflows/v1-engineering.yml)。规格层的维护契约见 [V1-02 产品模型](docs/PRODUCT-MODEL.md#12-v1-02-规格层实现)。
 
 ## 文档导航
 
