@@ -1,0 +1,29 @@
+{
+  "platform": "linux/amd64",
+  "applications": {
+    "frappe": {
+      "repository": "https://github.com/frappe/frappe.git",
+      "tag": "v16.55.0",
+      "commit": "90c8b61afd60ee49f982ca1a9751008e4ae1e24c"
+    },
+    "erpnext": {
+      "repository": "https://github.com/frappe/erpnext.git",
+      "tag": "v16.55.0",
+      "commit": "8e10a348daaa93853de8c36dc55ec789a440c219"
+    }
+  },
+  "images": {
+    "bench": "frappe/bench@sha256:258c5e0d91ebaf83cf314ac6573b1a04a5ce40353a6092bae86550d4299c0782",
+    "mariadb": "mariadb@sha256:d36f18d65a0459510b8b0f643b226a6d299e3206486e2b64ff20754a6d291707",
+    "redis": "redis@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe"
+  },
+  "tools": {
+    "python": "3.14.10",
+    "node": "24.22.3",
+    "yarn": "1.22.22",
+    "bench": "5.31.1",
+    "uv": "0.13.8",
+    "mariadb": "11.8.9",
+    "redis": "7.4.12"
+  }
+}

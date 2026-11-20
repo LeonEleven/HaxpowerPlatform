@@ -98,3 +98,13 @@ Desktop.ini
 *.swp
 *.swo
 *~
+
+# Formal V1 developer state. Bench and database live in Docker named volumes.
+/dev/v1/.runtime/
+/dev/v1/frappe-bench/
+/dev/v1/sites/
+/dev/v1/upstream/
+/dev/v1/volumes/
+/dev/v1/backups/
+/dev/v1/logs/
+/dev/v1/data/
