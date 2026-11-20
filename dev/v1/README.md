@@ -1,6 +1,6 @@
 # HaxpowerPlatform V1 开发环境
 
-正式发行包、Frappe App 和 Python import 均为 `haxpower_v1`，界面名为 HaxpowerPlatform。源代码位于 [apps/haxpower_v1](../../apps/haxpower_v1)。这个环境支持 V1-01 工程骨架、合成迁移演练及 V1-02 规格服务测试。它可与 ERPNext 技术实验及 Frappe-only Spike 并行使用。
+正式发行包、Frappe App 和 Python import 均为 `haxpower_v1`，界面名为 HaxpowerPlatform。源代码位于 [apps/haxpower_v1](../../apps/haxpower_v1)。这个环境支持 V1-01 工程骨架、合成迁移演练、V1-02 规格和 V1-03 SKU 服务测试。它可与 ERPNext 技术实验及 Frappe-only Spike 并行使用。
 
 ## 启动条件与版本
 
@@ -64,13 +64,21 @@ Compose、预检和运行态站点校验均能拒绝其他身份。测试覆盖�
 
 恢复时回到同一合成前版本，使用同一备份集还原数据库、站点配置和文件，逐项与故障前核对。再用当前版本重试迁移，核对样例 ID、文本、创建及修改时间和补丁记录，复跑迁移并校验第一个站点的样例状态。CI 日志记录数据库和版本身份、各阶段状态的 SHA-256、脱敏诊断和回环访问结果。
 
-V1-02 在上述流程中自动运行 [规格层 Frappe 集成测试](../../apps/haxpower_v1/haxpower_v1/catalog/test_catalog.py)。恢复后的升级站由合成探针显式建立分类、模板、规格、停用选项及审计，用真实员工会话验证原生 HTTP 写入被拒绝且数据无副作用，再两次运行 migrate 并比较七张目录表的结构、记录和引用。App 的 Bench 副本与当前 checkout 按文件内容核对，检查通过后才运行集成及站点命令。测试记录由临时站点生命周期管理，安装和迁移钩子只建立结构及工程角色。
+升级站恢复后，从仓库历史中固定的 PR #15 合并提交打包 V1-02 App 源码。先部署 V1-02 并建立合成分类、模板、规格、停用选项及审计，再部署当前版本，比较原有七张表和迁移样例的结构及记录。升级后重新执行 [规格层测试](../../apps/haxpower_v1/haxpower_v1/catalog/test_catalog.py) 和 [SKU 测试](../../apps/haxpower_v1/haxpower_v1/catalog/test_sku.py)。两组 MariaDB 独立连接分别竞争相同 SKU 编码及同一 ERPNext Item，并由第三个事务复核持久化结果。真实员工会话检查 HTTP 权限，再两次运行 migrate 并比较规格、审计、SKU 和原生映射的快照。App 副本按文件内容核对，安装和迁移钩子只建立结构及工程角色。
 
 ### 规格层内部维护
 
 已认证的工程调用方通过 `haxpower_v1.catalog.service` 和 `catalog.dto` 创建或编辑配置及规格。使用 `save_category`、`save_attribute`、`save_option`、`save_template`，编辑时带原记录 ID。使用 `create_specification`、`edit_specification`、`get_specification` 和 `get_specification_audit` 维护规格。属性输入按属性 ID 映射到值序列，单选和多选的元素均使用选项 ID。编辑需传读到的 `expected_revision`。维护角色 `HP V1 Catalog Maintainer` 需管理员显式授予，B01 和 B02 确认后由项目组集成真实模板和业务授权。
 
 [规格层数据与值语义](../../docs/PRODUCT-MODEL.md#12-v1-02-规格层实现) · [权限和事务](../../docs/TECHNICAL-DESIGN.md#v1-02-规格维护与事务)
+
+### 品牌与 SKU 内部维护
+
+服务在 `haxpower_v1.catalog.sku`，输入和输出定义在 `catalog.sku_dto`。内部调用方使用已有的目录维护会话。使用 `save_brand`、`get_brand`、`create_sku`、`edit_sku`、`get_sku` 和 `search_skus`。编辑传入读取时的 `expected_revision`，省略别名或标识保留已有值，传空列表清空对应子表。显式关联原生 Item 时以 `existing_item` 提供其记录名称，后续业务引用使用返回的稳定 SKU ID。站点 Administrator 可用 `diagnose_item_mapping` 检查原生记录。
+
+站点管理员在 B01 审定后配置 `hp_v1_sku_settings`，包含现有叶子 `item_group` 和 `uom_precision`（ERPNext UOM 名称到整数精度的映射）。创建所用 UOM 必须启用，整数单位精度为 0，其他单位的精度须在原生站点允许的范围内。缺少配置时拒绝 SKU 创建。演练用站点临时配置只引用显式创建的 `SYNTHETIC-*` UOM 和组。正式库存记账以及数量精度的端到端验证由后续任务实施。
+
+[SKU 模型](../../docs/PRODUCT-MODEL.md#13-v1-03-品牌库存-sku-和-item-映射) · [映射、权限和事务](../../docs/TECHNICAL-DESIGN.md#v1-03-sku-与原生主数据)
 
 ### 本机复现 CI
 

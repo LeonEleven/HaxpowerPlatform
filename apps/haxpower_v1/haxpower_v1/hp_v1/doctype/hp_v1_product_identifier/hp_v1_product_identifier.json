@@ -1,0 +1,50 @@
+{
+ "doctype": "DocType",
+ "name": "HP V1 Product Identifier",
+ "module": "HP V1",
+ "engine": "InnoDB",
+ "field_order": [
+  "kind",
+  "value",
+  "source",
+  "notes",
+  "search_text"
+ ],
+ "fields": [
+  {
+   "fieldname": "kind",
+   "label": "Identifier Type",
+   "fieldtype": "Select",
+   "options": "OEM\nMANUFACTURER\nENGRAVING\nLEGACY\nOTHER",
+   "reqd": 1
+  },
+  {
+   "fieldname": "value",
+   "label": "Identifier",
+   "fieldtype": "Data",
+   "reqd": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "source",
+   "label": "Source",
+   "fieldtype": "Data",
+   "length": 140
+  },
+  {
+   "fieldname": "notes",
+   "label": "Notes",
+   "fieldtype": "Small Text"
+  },
+  {
+   "fieldname": "search_text",
+   "label": "Normalized Search Text",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "read_only": 1,
+   "length": 140
+  }
+ ],
+ "istable": 1,
+ "permissions": []
+}

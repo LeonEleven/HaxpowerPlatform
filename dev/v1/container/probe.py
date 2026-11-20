@@ -46,7 +46,12 @@ def snapshot():
         from catalog_probe import snapshot as catalog_snapshot
 
         catalog = catalog_snapshot()
-    return {"schema": schema, "rows": rows, "patches": logs, "catalog": catalog}
+    sku = {}
+    if frappe.db.table_exists("HP V1 Stock Item"):
+        from sku_probe import snapshot as sku_snapshot
+
+        sku = sku_snapshot()
+    return {"schema": schema, "rows": rows, "patches": logs, "catalog": catalog, "sku": sku}
 
 
 def main(action, site):
@@ -68,6 +73,14 @@ def main(action, site):
             from catalog_probe import seed
 
             seed()
+        elif action == "seed-skus":
+            from sku_probe import seed
+
+            seed()
+        elif action == "sku-concurrency":
+            from sku_probe import verify_concurrency
+
+            verify_concurrency(site)
         elif action == "catalog-permissions":
             from catalog_probe import verify_native_denials
 

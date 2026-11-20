@@ -175,10 +175,10 @@ def write_common():
     temporary.replace(path)
 
 
-def deploy_app(previous=False, fault=False):
+def deploy_app(*, fixture=None, fault=False):
     require(not APP.is_symlink(), "unexpected App checkout link")
-    require(not (previous or fault) or UPGRADE in TARGETS, "fixture deployment requires a CI project")
-    source = Path(__file__).resolve().parent / "fixtures/app-0.1.0" if previous else SOURCE
+    require(not (fixture or fault) or UPGRADE in TARGETS, "fixture deployment requires a CI project")
+    source = fixture if fixture is not None else SOURCE
     source_files(source)
     if APP.exists():
         source_files(APP)

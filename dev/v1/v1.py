@@ -25,6 +25,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 APP = ROOT / "apps/haxpower_v1"
 LOCK = HERE / "versions.lock.json"
+CATALOG_BASELINE = "a76c508136deee7827f55ab862b4986ca751e244"
 TOOLS = HERE / "container"
 OWNER = "org.haxpower.v1.checkout"
 RUNTIME = {"web", "socketio", "worker", "scheduler"}
@@ -404,8 +405,14 @@ class Project:
             if action in {"prepare", "new-site", "install-erpnext", "install-app", "migrate", "integration"}:
                 require(not any(c["State"]["Running"] and c["Config"]["Labels"]["com.docker.compose.service"]
                                 in RUNTIME for c in containers.values()), "stop runtime before changing Bench or site")
-            self.dc("exec", "-T", "bench", "python", "/opt/hp-v1/bench.py",
-                    "enable-scheduler" if action == "start" else action)
+            command = ("exec", "-T", "bench", "python", "/opt/hp-v1/bench.py")
+            if action == "integration":
+                baseline = subprocess.check_output(
+                    ["git", "archive", "--format=tar", CATALOG_BASELINE, "apps/haxpower_v1"], cwd=ROOT,
+                )
+                subprocess.run([*self.compose, *command, action], input=baseline, check=True, env=self.environment)
+            else:
+                self.dc(*command, "enable-scheduler" if action == "start" else action)
             if action == "start":
                 self.dc("--profile", "runtime", "up", "-d", "--no-deps", *sorted(RUNTIME))
 

@@ -2,9 +2,12 @@
 
 from hashlib import sha256
 import json
+from pathlib import Path
 import os
 import subprocess
 import sys
+import tarfile
+from tempfile import TemporaryDirectory
 
 from bench import (BENCH, PROJECT, PYTHON, SITE, SITES, UPGRADE, check_bench, check_installed,
                    check_targets, create_site, deploy_app, redact, require, run, site_command, test_site)
@@ -12,6 +15,7 @@ from bench import (BENCH, PROJECT, PYTHON, SITE, SITES, UPGRADE, check_bench, ch
 
 PATCH = "haxpower_v1.patches.backfill_migration_sample"
 FIXTURE_VERSION = "0.1.0"
+FIXTURE = Path(__file__).resolve().parent / "fixtures/app-0.1.0"
 
 
 def inspect(action, target):
@@ -36,13 +40,22 @@ def install(target):
 def record(label, snapshot):
     digest = sha256(json.dumps(snapshot, sort_keys=True).encode()).hexdigest()
     catalog_rows = sum(len(table["rows"]) for table in snapshot["catalog"].values())
+    sku_tables = snapshot["sku"].get("tables", {})
+    sku_rows = sum(len(table["rows"]) for table in sku_tables.values())
     print(f"{label}: sha256={digest} rows={len(snapshot['rows'])} "
-          f"patch_records={len(snapshot['patches'])} catalog_rows={catalog_rows}", flush=True)
+          f"patch_records={len(snapshot['patches'])} catalog_rows={catalog_rows} sku_rows={sku_rows}", flush=True)
 
 
 def verify_catalog_schema(state):
     require(len(state["catalog"]) == 7 and all(table and not table["rows"] for table in state["catalog"].values()),
             "catalog schema missing or automatically seeded")
+
+
+def verify_sku_schema(state):
+    sku = state["sku"]
+    require(sku.get("marker") and len(sku["tables"]) == 4
+            and all(table and not table["rows"] for table in sku["tables"].values())
+            and not sku["native_items"], "SKU schema missing or automatically seeded")
 
 
 def repeat_migration(target, snapshot):
@@ -87,18 +100,19 @@ def integration():
     require(not clean["rows"] and len(clean["patches"]) == 1 and "baseline_revision" in clean["schema"],
             "unexpected clean baseline")
     verify_catalog_schema(clean)
+    verify_sku_schema(clean)
     record("clean install and first migration", clean)
     repeat_migration(SITE, clean)
 
     try:
-        deploy_app(previous=True)
+        deploy_app(fixture=FIXTURE)
         version = run(PYTHON, "-c", "import haxpower_v1; print(haxpower_v1.__version__)", capture=True)
         require(version.strip() == FIXTURE_VERSION, "previous fixture was not installed")
         install(UPGRADE)
         inspect("seed", UPGRADE)
         previous = inspect("snapshot", UPGRADE)
         require(len(previous["rows"]) == 1 and not previous["patches"] and not previous["catalog"]
-                and "baseline_revision" not in previous["schema"], "unexpected previous fixture state")
+                and not previous["sku"] and "baseline_revision" not in previous["schema"], "unexpected previous fixture state")
         record(f"synthetic previous release {FIXTURE_VERSION}", previous)
 
         site_path = SITES / UPGRADE
@@ -116,7 +130,7 @@ def integration():
         print("Injected migrate failed in haxpower_v1.patches.rehearsal_failure "
               "(HP_V1_REHEARSAL_PATCH_FAILURE). Schema and earlier patch persisted.", flush=True)
 
-        deploy_app(previous=True)
+        deploy_app(fixture=FIXTURE)
         config = site_path / "site_config.json"
         config.write_bytes(files["conf"].read_bytes())
         require(check_targets(UPGRADE), "restore target validation failed")
@@ -133,17 +147,40 @@ def integration():
     finally:
         deploy_app()
 
+    with TemporaryDirectory(prefix="hp-v1-catalog-baseline-", dir=BENCH) as path:
+        try:
+            # The host streams only the App directory from the pinned merged commit.
+            with tarfile.open(fileobj=sys.stdin.buffer, mode="r|") as archive:
+                archive.extractall(path, filter="data")
+            deploy_app(fixture=Path(path) / "apps/haxpower_v1")
+            version = run(PYTHON, "-c", "import haxpower_v1; print(haxpower_v1.__version__)", capture=True)
+            require(version.strip() == "0.3.0", "expected the merged V1-02 app")
+            site_command("migrate", target=UPGRADE)
+            upgraded = inspect("snapshot", UPGRADE)
+            verify_upgraded(upgraded, previous)
+            require(not upgraded["sku"], "SKU schema unexpectedly exists on V1-02")
+            inspect("seed-catalog", UPGRADE)
+            v102 = inspect("snapshot", UPGRADE)
+            require(sum(len(table["rows"]) for table in v102["catalog"].values()) == 9,
+                    "unexpected synthetic V1-02 fixture")
+            record("merged V1-02 schema with synthetic specification, inactive option and audit", v102)
+        finally:
+            deploy_app()
+
     check_bench()
     site_command("migrate", target=UPGRADE)
     upgraded = inspect("snapshot", UPGRADE)
-    verify_upgraded(upgraded, previous)
-    record("upgrade recovered and synthetic record preserved", upgraded)
-    inspect("seed-catalog", UPGRADE)
+    verify_sku_schema(upgraded)
+    require(all(upgraded[key] == v102[key] for key in ("rows", "schema", "patches", "catalog")),
+            "V1-03 migration changed existing V1-01 or V1-02 history")
+    record("V1-03 upgraded from the merged V1-02 App with history preserved", upgraded)
+    test_site(UPGRADE)
+    inspect("seed-skus", UPGRADE)
+    inspect("sku-concurrency", UPGRADE)
     inspect("catalog-permissions", UPGRADE)
     populated = inspect("snapshot", UPGRADE)
-    require(sum(len(table["rows"]) for table in populated["catalog"].values()) == 9,
-            "unexpected synthetic catalog migration fixture")
-    record("upgraded site with synthetic specification, inactive option and audit", populated)
+    require(len(populated["sku"]["native_items"]) == 4, "unexpected synthetic SKU fixture")
+    record("upgraded site with synthetic SKU and Item mappings", populated)
     repeat_migration(UPGRADE, populated)
     repeat_migration(UPGRADE, populated)
     check_installed(UPGRADE)

@@ -1,0 +1,50 @@
+{
+ "doctype": "DocType",
+ "name": "HP V1 Product Alias",
+ "module": "HP V1",
+ "engine": "InnoDB",
+ "field_order": [
+  "value",
+  "language",
+  "source",
+  "searchable",
+  "search_text"
+ ],
+ "fields": [
+  {
+   "fieldname": "value",
+   "label": "Alias",
+   "fieldtype": "Data",
+   "reqd": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "language",
+   "label": "Language",
+   "fieldtype": "Data",
+   "length": 35
+  },
+  {
+   "fieldname": "source",
+   "label": "Source",
+   "fieldtype": "Data",
+   "length": 140
+  },
+  {
+   "fieldname": "searchable",
+   "label": "Searchable",
+   "fieldtype": "Check",
+   "default": "1"
+  },
+  {
+   "fieldname": "search_text",
+   "label": "Normalized Search Text",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "read_only": 1,
+   "length": 140
+  }
+ ],
+ "istable": 1,
+ "permissions": []
+}

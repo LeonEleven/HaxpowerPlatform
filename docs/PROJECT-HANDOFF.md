@@ -81,7 +81,7 @@ B01–B12 均待确认。盘点冻结与截止、预留需求、留存、切换�
 
 ## 6. 当前项目进度
 
-**状态快照，2026-11-20（Asia/Shanghai）。** V1-01 PR #14 已合并，复核时工程 CI 通过，`origin/main` 为 `06e94e23c324b1fce3889dd05e6025861dd65ded`。V1-02 从该提交开始，在 Draft PR #15 实现分类、属性定义与选项、分类模板、技术规格、类型化子表及属性编辑审计。
+**状态快照，2026-11-20（Asia/Shanghai）。** V1-01 PR #14 和 V1-02 PR #15 已合并。V1-03 从 PR #15 的合并提交 `a76c508136deee7827f55ab862b4986ca751e244` 开始，在 Draft PR #16 交付品牌档案、独立 SKU 和与 ERPNext Item/UOM 的受控映射，待架构评审。
 
 | 文档 | 当前范围 |
 | --- | --- |
@@ -93,14 +93,16 @@ B01–B12 均待确认。盘点冻结与截止、预留需求、留存、切换�
 - **A02 本地证据。** `haxpower-v1-dev.localhost` 从空站实际安装 ERPNext 与 `haxpower_v1`，两次 `bench migrate` 和 2 项 Frappe 集成测试完成。第二工作区空站安装及重复迁移通过，按表结构、样例记录和补丁日志比较的 SHA-256 均为 `3925938fe7bf3e3791781b8928b3f7f8f217af8a5dd5d674acd1256ae4c918fb`。另一个隔离站点从合成 0.1.0 升级，实测后置补丁失败时新增列和已提交补丁仍在。恢复数据库、站点配置和公私文件后，样例与故障前摘要 `b79dd23bf89309cd0e95c0699dc412d348855c14f124938b91a8466c39998e6f` 一致。重试并复跑后，1 条既有记录和 1 条补丁日志的摘要保持 `efffda3c97d7dafb67a6b08f97e8276a54b1a60b0a398334111af84301b3b8ee`。本地临时项目经归属校验完成清理，实验容器、网络和卷与启动前快照一致。
 - **V1-02 本地工程证据。** 核对 Bench 副本与 checkout 的文件内容后，Frappe/ERPNext v16.55.0、MariaDB 11.8.9 的隔离空站通过 11 项目录测试和 2 项 V1-01 回归。覆盖 105 个候选选项、精确 Decimal、停用值保留、数据库唯一键及审计故障回滚。已登录的合成员工通过 8 项原生 REST v1/v2 和 `frappe.client` 写入拒绝检查，七张目录表无副作用。Web、Socket.IO、非法 Host 拒绝、worker 和 scheduler 的回环烟测通过。
 - **V1-02 迁移证据。** 空站安装和重跑迁移的数据及表结构摘要一致，SHA-256 为 `04468ba2b9783c80c50bf94dcb705c3d15a039b91c204f4e9747a8b7a5b1baee`。带既有合成记录的 0.1.0 站验证了迁移故障及同一备份点的数据库、站点配置和公私文件恢复。升级至 0.3.0 后，既有记录和补丁历史保留，包含停用选项、规格属性与审计的 9 条合成目录记录在两次重跑后摘要保持 `f93886f1c99cf6b043d02453fc6863813b76021d2769b7cbc7fde27dd1ee6fa1`。升级站用当前代码复跑 13 项 Frappe 集成测试通过。
+- **V1-03 隔离验证。** Frappe/ERPNext v16.55.0 和 MariaDB 11.8.9 上通过 21 项 Frappe 测试、两组独立连接争用、17 项认证 HTTP 拒绝、两项原生读取隐藏映射标记，以及 Web、Socket.IO、worker 和 scheduler 烟测。同规格的两个品牌 SKU 各自拥有稳定领域 ID 和独立原生 Item。
+- **V1-03 迁移证据。** 合成规格历史、SKU 及原生 Item 映射在本地站点两次 migrate 后快照一致，SHA-256 为 `bf17f66f3f7af89eb363ef97041e39525fe4750f7d6c6e5ad0f6ec33e38ae736`。空站安装、固定 V1-02 应用升级及旧版故障恢复的 CI 记录见 PR #16。
 
-V1-02 在锁定的正式隔离环境验证规格层，A03 的 SKU、搜索和库存摘要仍由 V1-03、V1-15 和 V1-20 衔接。B01 首批真实模板、多选字段及库存单位/精度和 B02 业务授权继续待确认。V1-05 负责员工入口与权限复测，A01/A02 和 G01 的发布候选验收由 V1-20 复核。
+V1-03 沿用 `catalog.service.get_specification(specification_id)` 的稳定 ID 和维护权限。A03 的授权库存摘要与带批次的 SKU 独立扣减由后续库存、V1-15 和 V1-20 衔接。B01 的真实模板、无品牌建档、单位精度和数量上限，以及 B02 的员工字段和仓库范围继续待确认。SKU 停用保持阻断，待 V1-07/V1-09 接入完整库存引用和写入协调。
 
-V1-02 评审后，下一任务为 **V1-03 品牌 SKU 与原生 Item 映射**。规格关联走 `catalog.service.get_specification(specification_id)` 的稳定 ID 和类型化 DTO。
+V1-03 架构评审后，按 Backlog 推进 **V1-04 仓库与库位映射**，随后由 V1-05 接入仓库与员工授权。
 
 每次完成重要开发阶段时更新此节，记录日期、对应 PR 或提交、实际完成范围、验收证据、未决项及下一任务。PR 状态是带日期的核对结果，下一会话重新查询。
 
-[V1-02](V1-DEVELOPMENT-BACKLOG.md#v1-02-分类属性与规格) · [V1-02 Draft PR #15](https://github.com/LeonEleven/HaxpowerPlatform/pull/15) · [PR #15 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/15/checks) · [V1-01 PR #14](https://github.com/LeonEleven/HaxpowerPlatform/pull/14) · [PR #14 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/14/checks)
+[V1-03](V1-DEVELOPMENT-BACKLOG.md#v1-03-品牌-sku-与原生-item-映射) · [V1-03 Draft PR #16](https://github.com/LeonEleven/HaxpowerPlatform/pull/16) · [PR #16 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/16/checks) · [V1-02 PR #15](https://github.com/LeonEleven/HaxpowerPlatform/pull/15) · [PR #15 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/15/checks) · [V1-01 PR #14](https://github.com/LeonEleven/HaxpowerPlatform/pull/14) · [PR #14 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/14/checks)
 
 ## 7. 不可破坏的技术约束
 
