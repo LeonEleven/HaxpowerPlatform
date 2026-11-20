@@ -25,7 +25,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 APP = ROOT / "apps/haxpower_v1"
 LOCK = HERE / "versions.lock.json"
-CATALOG_BASELINE = "a76c508136deee7827f55ab862b4986ca751e244"
+UPGRADE_BASELINE = "65e1992bed4a5ddaaf19d2096449ecf2b138055e"
 TOOLS = HERE / "container"
 OWNER = "org.haxpower.v1.checkout"
 RUNTIME = {"web", "socketio", "worker", "scheduler"}
@@ -408,7 +408,7 @@ class Project:
             command = ("exec", "-T", "bench", "python", "/opt/hp-v1/bench.py")
             if action == "integration":
                 baseline = subprocess.check_output(
-                    ["git", "archive", "--format=tar", CATALOG_BASELINE, "apps/haxpower_v1"], cwd=ROOT,
+                    ["git", "archive", "--format=tar", UPGRADE_BASELINE, "apps/haxpower_v1"], cwd=ROOT,
                 )
                 subprocess.run([*self.compose, *command, action], input=baseline, check=True, env=self.environment)
             else:

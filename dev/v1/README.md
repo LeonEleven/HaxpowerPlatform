@@ -1,6 +1,6 @@
 # HaxpowerPlatform V1 开发环境
 
-正式发行包、Frappe App 和 Python import 均为 `haxpower_v1`，界面名为 HaxpowerPlatform。源代码位于 [apps/haxpower_v1](../../apps/haxpower_v1)。这个环境支持 V1-01 工程骨架、合成迁移演练、V1-02 规格和 V1-03 SKU 服务测试。它可与 ERPNext 技术实验及 Frappe-only Spike 并行使用。
+正式发行包、Frappe App 和 Python import 均为 `haxpower_v1`，界面名为 HaxpowerPlatform。源代码位于 [apps/haxpower_v1](../../apps/haxpower_v1)。这个环境支持 V1-01 工程骨架、合成迁移演练、V1-02 规格、V1-03 SKU 和 V1-04 仓库库位测试。它可与 ERPNext 技术实验及 Frappe-only Spike 并行使用。
 
 ## 启动条件与版本
 
@@ -64,7 +64,9 @@ Compose、预检和运行态站点校验均能拒绝其他身份。测试覆盖�
 
 恢复时回到同一合成前版本，使用同一备份集还原数据库、站点配置和文件，逐项与故障前核对。再用当前版本重试迁移，核对样例 ID、文本、创建及修改时间和补丁记录，复跑迁移并校验第一个站点的样例状态。CI 日志记录数据库和版本身份、各阶段状态的 SHA-256、脱敏诊断和回环访问结果。
 
-升级站恢复后，从仓库历史中固定的 PR #15 合并提交打包 V1-02 App 源码。先部署 V1-02 并建立合成分类、模板、规格、停用选项及审计，再部署当前版本，比较原有七张表和迁移样例的结构及记录。升级后重新执行 [规格层测试](../../apps/haxpower_v1/haxpower_v1/catalog/test_catalog.py) 和 [SKU 测试](../../apps/haxpower_v1/haxpower_v1/catalog/test_sku.py)。两组 MariaDB 独立连接分别竞争相同 SKU 编码及同一 ERPNext Item，并由第三个事务复核持久化结果。真实员工会话检查 HTTP 权限，再两次运行 migrate 并比较规格、审计、SKU 和原生映射的快照。App 副本按文件内容核对，安装和迁移钩子只建立结构及工程角色。
+升级站恢复后，从已合并的 PR #16 提交 `65e1992bed4a5ddaaf19d2096449ecf2b138055e` 打包 V1-03 App 0.4.0。用该版本建立合成规格、停用选项、审计、品牌、SKU 及 Item 映射。注入 V1-04 迁移故障，从同一备份集恢复至 V1-03 后重试，再核对旧记录快照和服务读取结果。
+
+升级后复跑正式 App 的全部 Frappe 测试。两个独立 MariaDB 连接竞争相同 SKU 编码、同一 ERPNext Item 和同一个原生叶仓，第三个事务复核每组的提交结果。合成站用真实鉴权的回环 HTTP 检查仓库权限。创建 W1–W4、各两个库位及系统在途位置后，两次 migrate 比较包括领域记录、原生叶仓和反向标记在内的快照。两个站点各有独立数据库及站点文件。App 副本按文件内容核对，安装和迁移钩子建立结构及工程角色。
 
 ### 规格层内部维护
 
@@ -79,6 +81,14 @@ Compose、预检和运行态站点校验均能拒绝其他身份。测试覆盖�
 站点管理员在 B01 审定后配置 `hp_v1_sku_settings`，包含现有叶子 `item_group` 和 `uom_precision`（ERPNext UOM 名称到整数精度的映射）。创建所用 UOM 必须启用，整数单位精度为 0，其他单位的精度须在原生站点允许的范围内。缺少配置时拒绝 SKU 创建。演练用站点临时配置只引用显式创建的 `SYNTHETIC-*` UOM 和组。正式库存记账以及数量精度的端到端验证由后续任务实施。
 
 [SKU 模型](../../docs/PRODUCT-MODEL.md#13-v1-03-品牌库存-sku-和-item-映射) · [映射、权限和事务](../../docs/TECHNICAL-DESIGN.md#v1-03-sku-与原生主数据)
+
+### 仓库与库位内部维护
+
+批准的工程调用方在当前用户会话中使用 `haxpower_v1.warehouse.service`。管理员显式授予 `HP V1 Warehouse Maintainer`。创建仓库时传对应 ERPNext Company、已启用的顶层同公司分组仓名称、仓库编码和显示名称。用返回的 `warehouse.id` 创建库位，显式关联时传 `existing_native` 并先确认其为符合条件的空闲物理叶仓。使用 `list_warehouses`、`list_locations` 和按 ID 读取的 DTO 维护目录。物理选择通过 `resolve_location` 复核状态与映射。显示名称和描述编辑需带原记录的 `expected_revision`。
+
+ERPNext 设置向导安装标准 Warehouse Type `Transit`。未运行向导的空站需先准备该原生类型。站点 Administrator 通过内部 `provision_system_transit` 原子创建系统仓库和库位，使用 `diagnose_mapping` 或 `diagnose_native_mapping` 复核映射。停用及改名保护、受控原生权限和后续接入见技术说明。B02 的编码和角色使用合成数据验证，实际员工范围由 V1-05 接入。
+
+[库存模型](../../docs/INVENTORY-MODEL.md#4-仓库与库位) · [权限、事务与诊断](../../docs/TECHNICAL-DESIGN.md#v1-04-仓库库位与原生叶仓)
 
 ### 本机复现 CI
 
