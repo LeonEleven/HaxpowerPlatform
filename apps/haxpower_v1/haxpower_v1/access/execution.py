@@ -14,19 +14,20 @@ class NativeExecution:
     native_name: str
     domain_id: str
     existing: bool
+    sku_id: str | None
 
 
 _native_execution = ContextVar("hp_v1_native_execution", default=None)
 
 
 @contextmanager
-def native_write(authorize, *, service, native_name, domain_id, existing):
+def native_write(authorize, *, service, native_name, domain_id, existing, sku_id=None):
     """Run the adapter as the current actor in the caller's transaction."""
     from .policy import active_actor
 
     actor = active_actor()
     authorize()
-    token = _native_execution.set(NativeExecution(actor, service, native_name, domain_id, existing))
+    token = _native_execution.set(NativeExecution(actor, service, native_name, domain_id, existing, sku_id))
     had_search_setting = "disable_global_search" in frappe.conf
     previous = frappe.conf.get("disable_global_search")
     frappe.conf["disable_global_search"] = True
@@ -40,7 +41,7 @@ def native_write(authorize, *, service, native_name, domain_id, existing):
         _native_execution.reset(token)
 
 
-def allows_native_write(service, native_name, domain_id, *, existing):
+def allows_native_write(service, native_name, domain_id, *, existing, sku_id=None):
     return _native_execution.get() == NativeExecution(
-        frappe.session.user, service, native_name, domain_id, existing,
+        frappe.session.user, service, native_name, domain_id, existing, sku_id,
     )

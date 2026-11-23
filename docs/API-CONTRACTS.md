@@ -88,9 +88,11 @@ DocType、数据库字段或内部库存表。
 }
 ```
 
-出库/移库必须显式传
-`batchSelection`。字段缺失表示尚未选择，应拒绝提交，不能默认解释为
-NO_BATCH。
+入库、出库、移库和盘点正式提交都需显式传 `batchSelection`。缺少选择或 `mode` 时返回 `BATCH_SELECTION_REQUIRED`。未知模式和额外字段返回 `INVALID_BATCH_SELECTION`。`BATCH` 要求非空字符串，`NO_BATCH` 只接受 `mode`，库存响应中的 `batch` 为 `null`。
+
+V1-06 的候选规则可通过内部预览返回原文、候选值、策略版本和确认状态。裁剪首尾空白时，写入要求确认同一预览。若既有记录的规范键相同且原文不同，返回 `BATCH_NORMALIZATION_COLLISION` 并保留原记录。B03 审定后，正式业务命令按对应仓库与操作权限接入，业务响应和错误只使用领域 ID、真实批次文本或 `null`。
+
+[候选规则](ERPNEXT-V1-ADAPTATION-BOUNDARIES.md#批次输入规范) · [内部服务](TECHNICAL-DESIGN.md#v1-06-批次映射和事务)
 
 ## 5. 库存查询响应示例
 

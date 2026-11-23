@@ -47,6 +47,8 @@ REFERENCE_FIELDS = {
     "Work Order Item": "item_code",
 }
 ITEM_SERVICE = "SKU mapping"
+BATCH_ITEM_SERVICE = "Batch Item enablement"
+BATCH_SETTINGS = ("batch_number_series", "has_expiry_date", "shelf_life_in_days", "retain_sample")
 
 
 def ensure_schema():
@@ -109,7 +111,7 @@ def _conversion_factors(item):
     return sorted((row.uom or "", Decimal(str(row.conversion_factor or 0))) for row in item.uoms)
 
 
-def _matches(item, sku, *, locked=False):
+def _matches(item, sku, *, locked=False, batch_enabled=False):
     uom = frappe.db.get_value(
         "UOM", sku.stock_uom, ("name", "enabled", "must_be_whole_number"), as_dict=True, for_update=locked,
     )
@@ -127,7 +129,9 @@ def _matches(item, sku, *, locked=False):
         and not item.variant_of
         and not item.opening_stock
         and item.end_of_life and getdate(item.end_of_life) >= getdate()
-        and all(cint(item.get(field)) == value for field, value in FLAGS.items())
+        and cint(item.has_batch_no) == int(batch_enabled)
+        and all(cint(item.get(field)) == value for field, value in FLAGS.items() if field != "has_batch_no")
+        and (not batch_enabled or not any(item.get(field) for field in BATCH_SETTINGS))
         and _conversion_factors(item) == [(sku.stock_uom, Decimal(1))]
     )
 
@@ -166,6 +170,8 @@ def _item_doc(name, *, locked):
 
 
 def mapping_status(sku, *, locked=False) -> MappingStatus:
+    from ...inventory.batch.persistence import has_mapping
+
     item = _item_doc(sku.native_item, locked=locked)
     if item is None:
         return "Missing Item"
@@ -175,7 +181,8 @@ def mapping_status(sku, *, locked=False) -> MappingStatus:
     marker = item.get(SKU_MARKER)
     if marker and marker != sku.name and not frappe.db.get_value(SKU, marker, for_update=locked):
         return "Orphan Marker"
-    if marker != sku.name or not _matches(item, sku, locked=locked):
+    batch_enabled = bool(has_mapping(sku.name, locked=locked))
+    if marker != sku.name or not _matches(item, sku, locked=locked, batch_enabled=batch_enabled):
         return "Item Drift"
     return "Verified"
 
@@ -220,6 +227,45 @@ def _check_references(name):
             frappe.throw(f"The ERPNext Item has an active native reference in {doctype}.")
 
 
+def batch_settings_ready():
+    return bool(cint(frappe.db.get_single_value(
+        "Stock Settings", "enable_serial_and_batch_no_for_item", cache=False,
+    )))
+
+
+def _enable_batch(sku, batch_id):
+    """Enable the mapped Item in the Batch service's transaction."""
+    from ...inventory.batch.authorization import require_candidate_writer
+    from ...inventory.batch.dto import BatchError
+    from ...inventory.batch.persistence import has_mapping
+
+    require_candidate_writer(sku)
+    if mapping_status(sku, locked=True) != "Verified":
+        raise BatchError("BATCH_ITEM_INCOMPATIBLE")
+    doc = _item_doc(sku.native_item, locked=True)
+    if doc.has_batch_no:
+        return
+    if (not batch_settings_ready() or has_mapping(sku.name, locked=True)
+            or any(doc.get(field) for field in BATCH_SETTINGS)):
+        raise BatchError("BATCH_ITEM_INCOMPATIBLE")
+    try:
+        _check_references(doc.name)
+    except frappe.ValidationError:
+        raise BatchError("BATCH_ITEM_INCOMPATIBLE") from None
+    for doctype, field in (("Batch", "item"), ("Serial No", "item_code"), ("Serial and Batch Bundle", "item_code")):
+        if frappe.db.get_value(doctype, {field: doc.name}, for_update=True):
+            raise BatchError("BATCH_ITEM_INCOMPATIBLE")
+    doc.has_batch_no = 1
+    with native_write(
+        lambda: require_candidate_writer(sku), service=BATCH_ITEM_SERVICE, native_name=doc.name,
+        domain_id=batch_id, existing=True, sku_id=sku.name,
+    ):
+        # Scope contains the concrete mapping ID that the Item guard checks.
+        doc.flags.hp_v1_enable_batch_id = batch_id
+        doc.flags.notify_update = False
+        doc.save(ignore_permissions=True)
+
+
 def assert_deactivation_safe(sku):
     _check_references(sku.native_item)
     # Native document writers and future V1 workflows must share an exclusion
@@ -237,12 +283,13 @@ def managed_item(name, *, locked=False):
     )
 
 
-def _protected_item_fields(doc):
+def _protected_item_fields(doc, *, exclude_batch_flag=False):
     return (
         doc.get(SKU_MARKER) or None, doc.item_code, doc.item_name, doc.item_group, doc.stock_uom,
         cint(doc.disabled), doc.variant_of or None, Decimal(str(doc.opening_stock or 0)),
         getdate(doc.end_of_life) if doc.end_of_life else None,
-        *(cint(doc.get(field)) for field in FLAGS), _conversion_factors(doc),
+        *(cint(doc.get(field)) for field in FLAGS if not (exclude_batch_flag and field == "has_batch_no")),
+        *(doc.get(field) or None for field in BATCH_SETTINGS), _conversion_factors(doc),
     )
 
 
@@ -254,6 +301,13 @@ def guard_item_change(doc, method=None):
         return
     if marker or (existing and managed_item(name, locked=True)):
         previous = doc.get_doc_before_save()
+        batch_id = doc.flags.get("hp_v1_enable_batch_id")
+        if (marker and previous and batch_id
+                and allows_native_write(BATCH_ITEM_SERVICE, name, batch_id, existing=existing, sku_id=marker)
+                and not previous.has_batch_no and cint(doc.has_batch_no) == 1
+                and _protected_item_fields(doc, exclude_batch_flag=True)
+                == _protected_item_fields(previous, exclude_batch_flag=True)):
+            return
         # Preserve the existing Bench operator's non-identity maintenance.
         if (frappe.session.user == "Administrator" and not getattr(frappe.local, "request", None)
                 and previous and _protected_item_fields(doc) == _protected_item_fields(previous)):

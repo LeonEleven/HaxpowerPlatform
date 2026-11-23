@@ -113,10 +113,19 @@ V1-04 的仓库和库位使用稳定 ID。每个库位独占同公司 ERPNext �
 并以独立 MariaDB 连接验证 SKU、叶仓和授权配置的并发一致性。
 升级从已合并的 V1-04 开始，注入故障、恢复数据库及公私文件后保留已有规格审计、SKU、Item、
 仓库、库位和在途映射。升级站两次迁移复跑快照一致。Web、Socket.IO、非法 Host、
-worker 和 scheduler 烟测通过。B02、B04、B11 仍待确认。
-下一项 V1-06 接入正式批次映射和受控 Batch 操作。
+worker 和 scheduler 烟测通过。B02、B04、B11 仍待确认。项目负责人 LeonEleven 于
+2026-11-23 10:20（Asia/Shanghai）合并 PR #18，合并提交为
+`36d77f9ae6b5bee17a74f23b689996632748c644`。
 
-[V1-05 Draft PR #18](https://github.com/LeonEleven/HaxpowerPlatform/pull/18) · [PR #18 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/18/checks) · [权限设计](PERMISSIONS.md#10-v1-05-技术机制) · [入口矩阵](ERPNEXT-V1-ADAPTATION-BOUNDARIES.md#v1-05-原生入口矩阵) · [V1-05 验证](../dev/v1/README.md#v1-05-权限验证)
+[V1-05 PR #18](https://github.com/LeonEleven/HaxpowerPlatform/pull/18) · [PR #18 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/18/checks) · [权限设计](PERMISSIONS.md#10-v1-05-技术机制) · [入口矩阵](ERPNEXT-V1-ADAPTATION-BOUNDARIES.md#v1-05-原生入口矩阵) · [V1-05 验证](../dev/v1/README.md#v1-05-权限验证)
+
+**V1-06 批次映射，2026-11-23（Asia/Shanghai）。** 从 V1-05 合并提交开始实现三态选择、逐 SKU 的
+实批次和无批次映射、原子启用 Item 批次、原生 Batch 权限和管理员诊断。App 版本为
+0.7.0。锁定环境空站通过 47 项 Frappe 测试，含 39 项既有回归。B03 候选版本只用于合成数据。
+V1-07 在共用库存事务中接入批次、操作权限和仓库范围。
+正式收发的 Batch/Bundle 记账及逐桶数量验收由 V1-08/V1-09 继续完成。
+
+[开发分支](https://github.com/LeonEleven/HaxpowerPlatform/tree/feat/v1-06-batch-mapping) · [V1-06 开发验证](../dev/v1/README.md#v1-06-批次验证) · [批次服务](TECHNICAL-DESIGN.md#v1-06-批次映射和事务)
 
 每次完成重要开发阶段时更新此节，记录日期、对应 PR 或提交、实际完成范围、验收证据、未决项及下一任务。PR 状态是带日期的核对结果，下一会话重新查询。
 

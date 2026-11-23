@@ -15,16 +15,18 @@ from frappe.app import application
 from werkzeug.serving import WSGIRequestHandler, make_server
 
 from haxpower_v1.access.config import set_scope
-from haxpower_v1.access.policy import Mode, Operation, SCOPE, SCOPE_ROW
+from haxpower_v1.access.policy import Mode, Operation, SCOPE, SCOPE_ROW, authorized_warehouse_ids
 from haxpower_v1.warehouse import service
 from haxpower_v1.warehouse.test_warehouse import make_company, make_native, stock_counts
 
 from identity import require
 from sku_probe import PREFIX
+from warehouse_probe import _company_and_parent
 
 
 BUSINESS = "/api/method/haxpower_v1.access.api."
 STOCK_ROLES = ("Stock User", "Stock Manager", "Item Manager", "Purchase Manager", "Sales Manager")
+BASELINE_USER = "v1-access-v105-baseline-existing@example.invalid"
 
 
 def snapshot():
@@ -62,6 +64,27 @@ def synthetic_user(run_id, label, *operations, roles=(), enabled=1):
         roles=[{"role": role} for role in ("Employee", *roles, *(operation.role for operation in operations))],
     ).insert(ignore_permissions=True)
     return email, password
+
+
+def seed_existing_grant():
+    company, _ = _company_and_parent()
+    warehouse = service.list_warehouses(company=company)[0]
+    user, _ = synthetic_user("v105-baseline", "existing", Operation.WAREHOUSE_READ, Operation.INVENTORY_READ)
+    set_scope(user, company, Mode.SELECTED, [warehouse.id])
+    frappe.db.commit()
+    print("Merged V1-05 synthetic employee capability roles and selected warehouse grant persisted.")
+
+
+def verify_existing_grant():
+    company, _ = _company_and_parent()
+    warehouse = service.list_warehouses(company=company)[0]
+    frappe.set_user(BASELINE_USER)
+    try:
+        require(authorized_warehouse_ids(Operation.INVENTORY_READ) == (warehouse.id,),
+                "pre-upgrade authorization no longer resolves the same warehouse")
+    finally:
+        frappe.set_user("Administrator")
+    print("Pre-upgrade employee capability and warehouse selection verified after upgrade.")
 
 
 def verify_scope_concurrency(site, user, company, warehouse_id):
@@ -124,6 +147,12 @@ def verify_http(site):
     managed_item = f"{PREFIX}-A"
     sku = frappe.db.get_value("HP V1 Stock Item", {"native_item": managed_item}, ("name", "specification"), as_dict=True)
     require(sku, "missing baseline SKU")
+    from haxpower_v1.inventory.batch.persistence import MAPPING
+
+    batch_mapping = frappe.db.get_value(
+        MAPPING, {"kind": "NO_BATCH", "sku": sku.name}, ("name", "native_batch"), as_dict=True,
+    )
+    require(batch_mapping, "missing synthetic batch for HTTP boundary verification")
     all_user = synthetic_user(run_id, "all", Operation.WAREHOUSE_READ, Operation.INVENTORY_READ)
     selected = synthetic_user(run_id, "selected", Operation.WAREHOUSE_READ, Operation.TRANSFER, Operation.PRODUCT_READ)
     operator = synthetic_user(run_id, "operator", Operation.WAREHOUSE_MAINTAIN, Operation.RECEIVE, Operation.ISSUE)
@@ -189,6 +218,37 @@ def verify_http(site):
         escaped_leaf = quote(leaf, safe="")
         native_item = quote(managed_item, safe="")
         scope_type = quote(SCOPE, safe="")
+        native_batch = batch_mapping.native_batch
+        batch_url = quote(native_batch, safe="")
+        batch_doc = {"doctype": "Batch", "name": native_batch, "disabled": 1}
+        batch_input = {"item": managed_item, "batch_id": "HP-RB-synthetic-denied"}
+        batch_cases = (
+            ("REST v1 Batch create", "POST", "/api/resource/Batch", batch_input),
+            ("REST v1 Batch read", "GET", f"/api/resource/Batch/{batch_url}", None),
+            ("REST v1 Batch update", "PUT", f"/api/resource/Batch/{batch_url}", {"disabled": 1}),
+            ("REST v2 Batch read", "GET", f"/api/v2/document/Batch/{batch_url}", None),
+            ("REST v2 Batch update", "PATCH", f"/api/v2/document/Batch/{batch_url}", {"disabled": 1}),
+            ("REST v2 Batch delete", "DELETE", f"/api/v2/document/Batch/{batch_url}", None),
+            ("REST mapping detail", "GET", f"/api/v2/document/{quote(MAPPING, safe='')}/{batch_mapping.name}", None),
+            ("client Batch set value", "POST", "/api/method/frappe.client.set_value",
+             {"doctype": "Batch", "name": native_batch, "fieldname": "disabled", "value": 1}),
+            ("client Batch rename", "POST", "/api/method/frappe.client.rename_doc",
+             {"doctype": "Batch", "old_name": native_batch, "new_name": "synthetic-denied"}),
+            ("client Batch bulk insert", "POST", "/api/method/frappe.client.insert_many",
+             {"docs": [dict(batch_input, doctype="Batch")]}),
+            ("client Batch bulk update", "POST", "/api/method/frappe.client.bulk_update", {"docs": [batch_doc]}),
+            ("Desk Batch detail", "POST", "/api/method/frappe.desk.form.load.getdoc",
+             {"doctype": "Batch", "name": native_batch}),
+            ("Desk Batch save", "POST", "/api/method/frappe.desk.form.save.savedocs",
+             {"doc": frappe.as_json(batch_doc), "action": "Save"}),
+            ("internal Batch service", "POST", "/api/method/haxpower_v1.inventory.batch.service.resolve_or_create",
+             {"sku_id": sku.name, "selection": {"mode": "NO_BATCH"}}),
+        )
+        for label, method, path, body in batch_cases:
+            response = call(session, label, method, path, body=body, status=403)
+            require(native_batch not in response.text and "HP-RB-synthetic-denied" not in response.text
+                    and batch_mapping.name not in response.text, "native Batch or mapping leaked into an error")
+
         cases = (
             ("REST v1 managed Item detail", "GET", f"/api/resource/Item/{native_item}", None),
             ("REST v2 managed Item detail", "GET", f"/api/v2/document/Item/{native_item}", None),
@@ -294,6 +354,7 @@ def verify_http(site):
             ], "location projection leaked a hidden mapping or incorrect count")
             product = business(selected_session, "product summary", "get_sku", sku_id=sku.name)
             require(set(product) == {"id", "code", "display_name"}, "unapproved product fields leaked")
+            require(batch_mapping.native_batch not in str(product), "product API exposed a native Batch identity")
             business(selected_session, "specification summary", "get_specification", specification_id=sku.specification)
             business(all_session, "warehouse role cannot view product", "get_sku", sku_id=sku.name, status=403)
 
@@ -349,6 +410,6 @@ def verify_http(site):
         server.server_close()
         frappe.db.rollback()
     verify_scope_concurrency(site, absent[0], company, w1.id)
-    print(f"V1-05 cookie-session HTTP matrix: {len(outcomes)} checks", flush=True)
+    print(f"V1-05/V1-06 cookie-session HTTP matrix: {len(outcomes)} checks", flush=True)
     for label, code in outcomes:
         print(f"  {code} {label}", flush=True)
