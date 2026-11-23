@@ -9,6 +9,7 @@ from ...adapters.erpnext import batch as native, item
 from ...catalog.dto import ACTIVE
 from ...catalog.sku_persistence import SKU
 from ...catalog.validation import IDENTIFIER
+from ..guard import lock_stock_writes
 from .authorization import require_batch_operator, require_candidate_writer
 from .dto import (
     Batch, BatchError, BatchInput, BatchKind, BatchResolution, BatchSelection,
@@ -102,6 +103,7 @@ def resolve_or_create(
     parsed = normalize_selection(selection)
     try:
         with batch_write():
+            lock_stock_writes()
             # A current read under the SKU row lock serializes the first and
             # all subsequent selections, even if the caller has an old snapshot.
             sku = _load_sku(sku_id, locked=True)
@@ -127,3 +129,19 @@ def resolve_or_create(
     except Exception:
         # Never relay native exception text, SQL, or Batch names to callers.
         raise BatchError("BATCH_PERSISTENCE_FAILED") from None
+
+
+def lock_execution_mapping(sku, kind, batch_id):
+    """Resolve an existing identity under the shared stock guard without provisioning."""
+    if kind == BatchKind.NO_BATCH and batch_id is None:
+        rows = _matching_rows(sku, normalize_selection({"mode": BatchKind.NO_BATCH}), locked=True)
+        if not rows:
+            return None
+        if len(rows) != 1:
+            raise BatchError("BATCH_MAPPING_UNAVAILABLE")
+        row, = rows
+    else:
+        row = _load_batch(sku, batch_id, locked=True)
+    if row.kind != kind:
+        raise BatchError("BATCH_MAPPING_UNAVAILABLE")
+    return _verified_batch(row, sku, locked=True)

@@ -66,7 +66,13 @@ def snapshot():
         from batch_probe import snapshot as batch_snapshot
 
         batch = batch_snapshot()
-    return {"access": access, "batch": batch, "schema": schema, "rows": rows, "patches": logs, "catalog": catalog, "sku": sku,
+    operations = {}
+    if frappe.db.table_exists("HP V1 Stock Document"):
+        from stock_probe import snapshot as stock_snapshot
+
+        operations = stock_snapshot()
+    return {"access": access, "batch": batch, "operations": operations, "schema": schema, "rows": rows,
+            "patches": logs, "catalog": catalog, "sku": sku,
             "warehouse": warehouse}
 
 
@@ -121,10 +127,14 @@ def main(action, site):
             from access_probe import verify_existing_grant
 
             verify_existing_grant()
-        elif action == "batch-verify":
-            from batch_probe import seed_and_verify
+        elif action in {"seed-batches", "batch-verify"}:
+            from batch_probe import seed_existing, verify_concurrency
 
-            seed_and_verify(site)
+            seed_existing() if action == "seed-batches" else verify_concurrency(site)
+        elif action in {"stock-execution", "verify-stock"}:
+            from stock_probe import run, verify_persisted
+
+            run(site) if action == "stock-execution" else verify_persisted()
         elif action == "access-http":
             from access_probe import verify_http
 

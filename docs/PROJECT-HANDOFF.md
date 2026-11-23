@@ -119,13 +119,28 @@ worker 和 scheduler 烟测通过。B02、B04、B11 仍待确认。项目负责�
 
 [V1-05 PR #18](https://github.com/LeonEleven/HaxpowerPlatform/pull/18) · [PR #18 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/18/checks) · [权限设计](PERMISSIONS.md#10-v1-05-技术机制) · [入口矩阵](ERPNEXT-V1-ADAPTATION-BOUNDARIES.md#v1-05-原生入口矩阵) · [V1-05 验证](../dev/v1/README.md#v1-05-权限验证)
 
-**V1-06 批次映射，2026-11-23（Asia/Shanghai）。** 从 V1-05 合并提交开始实现三态选择、逐 SKU 的
+**V1-06 批次映射，2026-11-23（Asia/Shanghai）。** LeonEleven 于 11:11 手动合并 PR #19，合并提交为
+`ea015de74fd6c6201425c2e71a575bd04b39ac17`。从 V1-05 合并提交开始实现三态选择、逐 SKU 的
 实批次和无批次映射、原子启用 Item 批次、原生 Batch 权限和管理员诊断。App 版本为
 0.7.0。锁定环境空站通过 47 项 Frappe 测试，含 39 项既有回归。B03 候选版本只用于合成数据。
 V1-07 在共用库存事务中接入批次、操作权限和仓库范围。
 正式收发的 Batch/Bundle 记账及逐桶数量验收由 V1-08/V1-09 继续完成。
 
-[V1-06 Draft PR #19](https://github.com/LeonEleven/HaxpowerPlatform/pull/19) · [PR #19 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/19/checks) · [V1-06 开发验证](../dev/v1/README.md#v1-06-批次验证) · [批次服务](TECHNICAL-DESIGN.md#v1-06-批次映射和事务)
+[V1-06 PR #19](https://github.com/LeonEleven/HaxpowerPlatform/pull/19) · [PR #19 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/19/checks) · [V1-06 开发验证](../dev/v1/README.md#v1-06-批次验证) · [批次服务](TECHNICAL-DESIGN.md#v1-06-批次映射和事务)
+
+**V1-07 库存执行内核，2026-11-23（Asia/Shanghai）。** 从 PR #19 的已合并提交开始。App 0.8.0
+包含稳定多行身份、精确桶合计、当前读、一次提交的事务边界、授权后重放与轻量原生关联。
+真实数量仍由 ERPNext 维护。V1-08 从 V1-07 审查及手动合并后的提交接入 Material Receipt，先验证
+原生事务、Batch/Bundle 和逐桶精度。B01、B03、B08 待确认。
+
+本地隔离 MariaDB 11.8.9 验证四组双连接争用、旧读视图、真实锁等待超时、提交前断连和提交后
+回包丢失。新连接核对 11 个已提交请求及 82 条原生替身关联。114 项真实 Cookie 会话检查通过，
+其中新增 6 项库存单据、请求、日志或内部执行入口拒绝。连续两次迁移、故障恢复及恢复后迁移的
+合成操作快照一致，SHA-256 为 `1af3cdaed67bb4262fb27c7b4b0ee6b1437c86fe5438ceefff964584381f9d07`。
+通过同一备份点恢复数据库、站点配置和公私文件。空站、升级站和恢复站均通过 47 项 Frappe 回归。
+恢复后再次执行并发及故障探针，核对累计 22 个已提交请求和 164 条原生替身关联。
+
+[V1-07 执行内核](TECHNICAL-DESIGN.md#v1-07-库存执行内核) · [隔离验收路径](../dev/v1/README.md#v1-07-库存事务验证)
 
 每次完成重要开发阶段时更新此节，记录日期、对应 PR 或提交、实际完成范围、验收证据、未决项及下一任务。PR 状态是带日期的核对结果，下一会话重新查询。
 

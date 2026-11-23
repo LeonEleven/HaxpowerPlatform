@@ -1,0 +1,107 @@
+{
+ "doctype": "DocType",
+ "name": "HP V1 Stock Document Line",
+ "module": "HP V1",
+ "engine": "InnoDB",
+ "field_order": [
+  "document_id",
+  "line_no",
+  "sku_id",
+  "source",
+  "target",
+  "batch_kind",
+  "batch_id",
+  "quantity",
+  "uom",
+  "reason",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "document_id",
+   "label": "Document Id",
+   "fieldtype": "Link",
+   "read_only": 1,
+   "options": "HP V1 Stock Document",
+   "reqd": 1
+  },
+  {
+   "fieldname": "line_no",
+   "label": "Line No",
+   "fieldtype": "Int",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "sku_id",
+   "label": "Sku Id",
+   "fieldtype": "Link",
+   "read_only": 1,
+   "options": "HP V1 Stock Item",
+   "reqd": 1
+  },
+  {
+   "fieldname": "source",
+   "label": "Source",
+   "fieldtype": "Link",
+   "read_only": 1,
+   "options": "HP V1 Warehouse Location",
+   "reqd": 0
+  },
+  {
+   "fieldname": "target",
+   "label": "Target",
+   "fieldtype": "Link",
+   "read_only": 1,
+   "options": "HP V1 Warehouse Location",
+   "reqd": 0
+  },
+  {
+   "fieldname": "batch_kind",
+   "label": "Batch Kind",
+   "fieldtype": "Select",
+   "read_only": 1,
+   "options": "BATCH\nNO_BATCH",
+   "reqd": 1
+  },
+  {
+   "fieldname": "batch_id",
+   "label": "Batch Id",
+   "fieldtype": "Link",
+   "read_only": 1,
+   "options": "HP V1 Batch Mapping",
+   "reqd": 0
+  },
+  {
+   "fieldname": "quantity",
+   "label": "Quantity",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140,
+   "reqd": 1
+  },
+  {
+   "fieldname": "uom",
+   "label": "Uom",
+   "fieldtype": "Link",
+   "read_only": 1,
+   "options": "UOM",
+   "reqd": 1
+  },
+  {
+   "fieldname": "reason",
+   "label": "Reason",
+   "fieldtype": "Small Text",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes",
+   "label": "Notes",
+   "fieldtype": "Small Text",
+   "read_only": 1
+  }
+ ],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "permissions": []
+}

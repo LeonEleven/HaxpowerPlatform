@@ -82,6 +82,8 @@ DocType/ERPNext 标准对象；若独立自研，再按数据库生成 DDL。
 
 ### stock_balances
 
+在 ERPNext V1 中，此节描述逻辑余额。物理数量事实来自 ERPNext 有效 SLE 和已提交 Bundle，Bin 提供原生汇总。App 不建立可写余额表。
+
 `id PK, stock_item_id FK, warehouse_location_id FK, batch_id FK NULL, quantity_on_hand DECIMAL, row_version, updated_at`
 
 逻辑唯一键：`stock_item_id + warehouse_location_id + batch_id`。数据库需为非
@@ -89,6 +91,8 @@ NULL batch 和 NULL batch 分别建立唯一约束，避免 NULL
 导致重复无批次余额行。
 
 ### stock_ledger
+
+ERPNext V1 使用原生数量流水。App 的轻量操作日志记录业务归属和原生引用，不存数量向量。
 
 `id PK, transaction_id, document_type, document_id, document_line_id, stock_item_id FK, warehouse_location_id FK, batch_id FK NULL, quantity_delta DECIMAL, transaction_type, operator_id, occurred_at, created_at, remark, reversal_of_ledger_id NULL`
 
@@ -108,6 +112,21 @@ NULL batch 和 NULL batch 分别建立唯一约束，避免 NULL
 
 出库/移库行还需要明确的 batch selection
 mode，区分明确选择无批次与未选择。
+
+### V1-07 实际持久化
+
+| DocType | 身份和关联 |
+| --- | --- |
+| `HP V1 Stock Write Guard` | 每站点一个固定守卫行。批次映射跨公司共享，因此首次建映射也锁此行。 |
+| `HP V1 Stock Document` | `name` 为服务端生成的稳定 ID。Company 与业务编号联合唯一。记录类型、创建者、时间、备注、状态、版本及生效操作。 |
+| `HP V1 Stock Document Line` | 每行独立生成 `name`。记录单据 ID、行序、SKU、源和目标库位、批次种类、可空映射 ID、数量、UOM、原因和备注。单据内行序唯一。同桶的行独立保存。数量使用经过精度和长度校验的规范十进制文本，数据库为 `VARCHAR(140)`。 |
+| `HP V1 Stock Request` | 每站点的 Company、认证用户、命令和键摘要有联合唯一索引。记录原键、规范负载 SHA-256、单据 ID、状态、完成时间和结果操作及版本。事务内 Pending 在提交前转 Completed。失败尝试全部回滚，错误由执行接口返回。 |
+| `HP V1 Operation Log` | 稳定操作 ID、动作、文档、请求、认证操作者、服务端创建时间、原因、可空原操作引用与结果版本。请求唯一，且单据和生效动作标识联合唯一。重复生效保护独立于请求记录留存。 |
+| `HP V1 Operation Native Link` | 从操作关联到业务行、角色、原生父 DocType 和 ID，以及原生明细 DocType 和 ID。操作、角色和原生父子引用唯一。服务校验明细属于所记录的父单，且所有业务行均有关联。 |
+
+`HP V1 Synthetic Native Document` 和 `HP V1 Synthetic Native Detail` 用于隔离测试的父子引用。V1-07 只验证合成的 Draft → Effective 和版本递增，普通维护入口不能改写、改名或删除这些记录。移库接收、盘点、纠错及审批的状态仍由对应任务定义。
+
+[执行内核](TECHNICAL-DESIGN.md#v1-07-库存执行内核)
 
 ### stock_transfers
 

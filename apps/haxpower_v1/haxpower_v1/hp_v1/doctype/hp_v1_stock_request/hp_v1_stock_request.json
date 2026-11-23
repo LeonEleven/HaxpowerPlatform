@@ -1,0 +1,108 @@
+{
+ "doctype": "DocType",
+ "name": "HP V1 Stock Request",
+ "module": "HP V1",
+ "engine": "InnoDB",
+ "field_order": [
+  "company",
+  "actor",
+  "command",
+  "idempotency_key",
+  "key_digest",
+  "payload_digest",
+  "document_id",
+  "status",
+  "result_operation",
+  "result_revision",
+  "completed_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "company",
+   "label": "Company",
+   "fieldtype": "Link",
+   "read_only": 1,
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "fieldname": "actor",
+   "label": "Actor",
+   "fieldtype": "Link",
+   "read_only": 1,
+   "options": "User",
+   "reqd": 1
+  },
+  {
+   "fieldname": "command",
+   "label": "Command",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 40,
+   "reqd": 1
+  },
+  {
+   "fieldname": "idempotency_key",
+   "label": "Idempotency Key",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 100,
+   "reqd": 1
+  },
+  {
+   "fieldname": "key_digest",
+   "label": "Key Digest",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 64,
+   "reqd": 1
+  },
+  {
+   "fieldname": "payload_digest",
+   "label": "Payload Digest",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 64,
+   "reqd": 1
+  },
+  {
+   "fieldname": "document_id",
+   "label": "Document Id",
+   "fieldtype": "Link",
+   "read_only": 1,
+   "options": "HP V1 Stock Document",
+   "reqd": 1
+  },
+  {
+   "fieldname": "status",
+   "label": "Status",
+   "fieldtype": "Select",
+   "read_only": 1,
+   "options": "Pending\nCompleted",
+   "reqd": 1
+  },
+  {
+   "fieldname": "result_operation",
+   "label": "Result Operation",
+   "fieldtype": "Link",
+   "read_only": 1,
+   "options": "HP V1 Operation Log",
+   "reqd": 0
+  },
+  {
+   "fieldname": "result_revision",
+   "label": "Result Revision",
+   "fieldtype": "Int",
+   "read_only": 1
+  },
+  {
+   "fieldname": "completed_at",
+   "label": "Completed At",
+   "fieldtype": "Datetime",
+   "read_only": 1
+  }
+ ],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "permissions": []
+}

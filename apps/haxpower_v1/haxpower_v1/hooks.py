@@ -40,6 +40,7 @@ _warehouse_adapter = "haxpower_v1.adapters.erpnext.warehouse"
 after_install.extend([
     "haxpower_v1.warehouse.persistence.ensure_schema",
     "haxpower_v1.inventory.batch.persistence.ensure_schema",
+    "haxpower_v1.inventory.operations.persistence.ensure_schema",
     f"{_warehouse_adapter}.ensure_schema",
 ])
 

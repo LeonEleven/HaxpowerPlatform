@@ -87,11 +87,11 @@ def _race(site, sku_id, selection):
           "one read-only replay and a third verification.", flush=True)
 
 
-def seed_and_verify(site):
+def seed_existing():
     original_stock = _stock_counts()
     frappe.conf[POLICY_SETTING] = CANDIDATE_VERSION
     frappe.db.set_single_value("Stock Settings", "enable_serial_and_batch_no_for_item", 1)
-    first, second, race_sku = [_sku_id(suffix) for suffix in ("A", "B", "RACE")]
+    first, second = [_sku_id(suffix) for suffix in ("A", "B")]
     bindings = ((first, STD61), (first, STD62), (first, NO_BATCH), (second, STD61), (second, NO_BATCH))
     native_names = set()
     for sku_id, selection in bindings:
@@ -101,6 +101,12 @@ def seed_and_verify(site):
         native_names.add(native.resolve_native_batch(sku_id, outcome.batch.id))
     require(len(native_names) == len(bindings), "different synthetic batches share a native identity")
     frappe.db.commit()
+    require(_stock_counts() == original_stock, "batch fixtures unexpectedly created stock or accounting records")
+
+
+def verify_concurrency(site):
+    original_stock = _stock_counts()
+    first, race_sku = [_sku_id(suffix) for suffix in ("A", "RACE")]
     _race(site, race_sku, NO_BATCH)
     _race(site, first, {"mode": "BATCH", "batchNo": "RACE-STD"})
     require(len(snapshot()["rows"]) == len(snapshot()["native"]) == 7, "unexpected persisted Batch counts")
