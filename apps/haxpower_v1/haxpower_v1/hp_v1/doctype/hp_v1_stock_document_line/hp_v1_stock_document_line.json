@@ -11,6 +11,7 @@
   "target",
   "batch_kind",
   "batch_id",
+  "batch_no",
   "quantity",
   "uom",
   "reason",
@@ -71,6 +72,13 @@
    "read_only": 1,
    "options": "HP V1 Batch Mapping",
    "reqd": 0
+  },
+  {
+   "fieldname": "batch_no",
+   "label": "Batch Number",
+   "fieldtype": "Data",
+   "length": 80,
+   "read_only": 1
   },
   {
    "fieldname": "quantity",

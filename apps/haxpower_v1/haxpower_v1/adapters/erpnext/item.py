@@ -233,13 +233,15 @@ def batch_settings_ready():
     )))
 
 
-def _enable_batch(sku, batch_id):
+def _enable_batch(sku, batch_id, *, authorize=None):
     """Enable the mapped Item in the Batch service's transaction."""
     from ...inventory.batch.authorization import require_candidate_writer
     from ...inventory.batch.dto import BatchError
     from ...inventory.batch.persistence import has_mapping
 
-    require_candidate_writer(sku)
+    receipt = authorize is not None and authorize is not require_candidate_writer
+    authorize = authorize or require_candidate_writer
+    authorize(sku)
     if mapping_status(sku, locked=True) != "Verified":
         raise BatchError("BATCH_ITEM_INCOMPATIBLE")
     doc = _item_doc(sku.native_item, locked=True)
@@ -257,13 +259,15 @@ def _enable_batch(sku, batch_id):
             raise BatchError("BATCH_ITEM_INCOMPATIBLE")
     doc.has_batch_no = 1
     with native_write(
-        lambda: require_candidate_writer(sku), service=BATCH_ITEM_SERVICE, native_name=doc.name,
+        lambda: authorize(sku), service=BATCH_ITEM_SERVICE, native_name=doc.name,
         domain_id=batch_id, existing=True, sku_id=sku.name,
     ):
         # Scope contains the concrete mapping ID that the Item guard checks.
         doc.flags.hp_v1_enable_batch_id = batch_id
         doc.flags.notify_update = False
-        doc.save(ignore_permissions=True)
+        # A receipt records this change under its actor and operation.
+        # A Frappe Version would emit realtime notifications.
+        doc.save(ignore_permissions=True, ignore_version=receipt or None)
 
 
 def assert_deactivation_safe(sku):

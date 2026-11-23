@@ -328,6 +328,8 @@ def verify_http(site):
             ("operation log list", "GET", f"/api/v2/document/{quote(LOG, safe='')}", None),
             ("internal stock executor", "POST", "/api/method/haxpower_v1.inventory.operations.synthetic.execute",
              {"command": {"document_id": stock_document}}),
+            ("internal receipt draft", "POST", "/api/method/haxpower_v1.inventory.receipt.service.create_draft", {}),
+            ("internal receipt submit", "POST", "/api/method/haxpower_v1.inventory.receipt.service.submit", {}),
         ):
             call(operator_session, label, method, path, body=body, status=403)
 

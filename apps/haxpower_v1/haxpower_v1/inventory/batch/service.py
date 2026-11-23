@@ -107,21 +107,7 @@ def resolve_or_create(
             # A current read under the SKU row lock serializes the first and
             # all subsequent selections, even if the caller has an old snapshot.
             sku = _load_sku(sku_id, locked=True)
-            require_candidate_writer(sku)
-            rows = _matching_rows(sku, parsed, locked=True)
-            preview = _confirmed_preview(parsed, rows, confirmation)
-            if rows:
-                if len(rows) != 1:
-                    raise BatchError("BATCH_MAPPING_UNAVAILABLE")
-                return BatchResolution(_verified_batch(rows[0], sku, locked=True), preview, created=False)
-            prior = mappings({"sku": sku.name}, locked=True)
-            if any(validated_identity(row) is None for row in prior):
-                raise BatchError("BATCH_MAPPING_UNAVAILABLE")
-            native.assert_native_ownership(sku, prior)
-            batch_id = uuid4().hex
-            item._enable_batch(sku, batch_id)
-            row = native.create_mapping(sku, batch_id, parsed, CANDIDATE_VERSION)
-            return BatchResolution(_verified_batch(row, sku, locked=True), preview, created=True)
+            return _resolve_locked(sku, parsed, require_candidate_writer, confirmation=confirmation)
     except BatchError:
         raise
     except (frappe.QueryDeadlockError, frappe.QueryTimeoutError):
@@ -129,6 +115,25 @@ def resolve_or_create(
     except Exception:
         # Never relay native exception text, SQL, or Batch names to callers.
         raise BatchError("BATCH_PERSISTENCE_FAILED") from None
+
+
+def _resolve_locked(sku, parsed, authorize, *, confirmation=None):
+    """Resolve under the shared stock guard in the caller's transaction."""
+    authorize(sku)
+    rows = _matching_rows(sku, parsed, locked=True)
+    preview = _confirmed_preview(parsed, rows, confirmation)
+    if rows:
+        if len(rows) != 1:
+            raise BatchError("BATCH_MAPPING_UNAVAILABLE")
+        return BatchResolution(_verified_batch(rows[0], sku, locked=True), preview, created=False)
+    prior = mappings({"sku": sku.name}, locked=True)
+    if any(validated_identity(row) is None for row in prior):
+        raise BatchError("BATCH_MAPPING_UNAVAILABLE")
+    native.assert_native_ownership(sku, prior)
+    batch_id = uuid4().hex
+    item._enable_batch(sku, batch_id, authorize=authorize)
+    row = native.create_mapping(sku, batch_id, parsed, CANDIDATE_VERSION, authorize=authorize)
+    return BatchResolution(_verified_batch(row, sku, locked=True), preview, created=True)
 
 
 def lock_execution_mapping(sku, kind, batch_id):

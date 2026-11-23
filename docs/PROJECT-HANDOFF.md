@@ -130,8 +130,8 @@ V1-07 在共用库存事务中接入批次、操作权限和仓库范围。
 
 **V1-07 库存执行内核，2026-11-23（Asia/Shanghai）。** 从 PR #19 的已合并提交开始。App 0.8.0
 包含稳定多行身份、精确桶合计、当前读、一次提交的事务边界、授权后重放与轻量原生关联。
-真实数量仍由 ERPNext 维护。V1-08 从 V1-07 审查及手动合并后的提交接入 Material Receipt，先验证
-原生事务、Batch/Bundle 和逐桶精度。B01、B03、B08 待确认。
+真实数量仍由 ERPNext 维护。LeonEleven 于 14:37 手动合并 PR #20，提交为
+`d48e97115bb80acfae8b29cbef17ff18d5eaba7a`。B01、B03、B08 待确认。
 
 本地隔离 MariaDB 11.8.9 验证四组双连接争用、旧读视图、真实锁等待超时、提交前断连和提交后
 回包丢失。新连接核对 11 个已提交请求及 82 条原生替身关联。114 项真实 Cookie 会话检查通过，
@@ -141,7 +141,19 @@ V1-07 在共用库存事务中接入批次、操作权限和仓库范围。
 恢复后再次执行并发及故障探针，核对累计 22 个已提交请求和 164 条原生替身关联。Web、Socket.IO、
 非法 Host 拒绝、worker 和 scheduler 烟测通过。专属隔离项目资源已验证归属并清理。
 
-[V1-07 Draft PR #20](https://github.com/LeonEleven/HaxpowerPlatform/pull/20) · [PR #20 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/20/checks) · [V1-07 执行内核](TECHNICAL-DESIGN.md#v1-07-库存执行内核) · [隔离验收路径](../dev/v1/README.md#v1-07-库存事务验证)
+[V1-07 PR #20](https://github.com/LeonEleven/HaxpowerPlatform/pull/20) · [PR #20 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/20/checks) · [V1-07 执行内核](TECHNICAL-DESIGN.md#v1-07-库存执行内核) · [隔离验收路径](../dev/v1/README.md#v1-07-库存事务验证)
+
+**V1-08 多行入库，2026-11-23（Asia/Shanghai）。** App 0.9.0 从已合并的 PR #20 开始，
+实现显式批次与无批次的收货草稿、一次提交边界、原生 Material Receipt 与逐行业务关联。
+在锁定的隔离环境跟踪每条 Detail、Bundle 和有效 SLE，按域 SKU、物理库位和批次对账并复核 Bin。
+在第一条原生流水前检查 ERPNext 的显式精度，避免原生累计余额按两位失配。
+已核对六行、五桶及零估值样本的零 GL 结果。独立永续库存候选以 2 单位、4.25 单价生成
+借贷各 8.50 的两条 GL。双连接同键和异键竞争、原生故障回滚、断连恢复和 47 项既有
+Frappe 测试通过。空站含原生库存的重复迁移快照一致，完整升级与恢复证据查看 PR 的检查。
+真实员工入库等待 B01、B03、B12 放行。V1-09 从 V1-08 审查和手动合并后的提交复用
+事务、权限和行关联，并接入原生 Material Issue、精确扣减及可用量校验。
+
+[V1-08 Draft PR #21](https://github.com/LeonEleven/HaxpowerPlatform/pull/21) · [PR #21 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/21/checks) · [入库技术设计](TECHNICAL-DESIGN.md#v1-08-多行-material-receipt) · [入库验收路径](../dev/v1/README.md#v1-08-多行入库验证)
 
 每次完成重要开发阶段时更新此节，记录日期、对应 PR 或提交、实际完成范围、验收证据、未决项及下一任务。PR 状态是带日期的核对结果，下一会话重新查询。
 

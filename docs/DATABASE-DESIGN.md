@@ -179,3 +179,7 @@ V1 至少包括 `inventory_approval_enabled` 和
 - 流水采用追加写入策略。
 - 库存余额必须可从流水核对或重建。
 - 本文是逻辑模型，不代表已选 PostgreSQL、MariaDB 或其他数据库。
+
+### V1-08 入库选择与明细关联
+
+`HP V1 Stock Document Line.batch_no` 保存入库草稿选择的领域批次文本。显式 `NO_BATCH` 时该字段为空；既有按领域 Batch ID 提交的 V1-07 行继续沿用原字段。提交解析出的 Batch 映射只在本次计划中用于定位原生批次。业务行通过 `HP V1 Operation Native Link` 关联 `Stock Entry Detail`，其父原生单据为 `Stock Entry`。Detail、Bundle 和 SLE 按同一原生明细 ID 关联。余额由 ERPNext 原生表维护。
