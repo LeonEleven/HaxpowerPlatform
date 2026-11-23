@@ -123,3 +123,11 @@ InventoryValuationLayer、InventoryCostEntry、StockValuationAdjustment。数量
 
 采用 ERPNext
 时必须验证其内置估值行为，即使业务界面不展示金额，底层也可能仍维护估值数据。
+
+## 12. V1-08 多行入库
+
+入库草稿保留稳定单据 ID、逐行业务 ID、目标库位、库存单位、Decimal 数量字符串和显式批次选择。提交重新核对当前仓库授权、同公司物理叶仓和 SKU/Item 映射，然后在共用库存锁内解析或首次创建 Batch 映射。系统在途不能用作入库目标。
+
+ERPNext 为每条业务行生成一条 Stock Entry Detail、一个已提交的入向 Bundle 和一条有效 SLE。即使两行是同一库存桶，原生明细也分别保留。无批次使用该 SKU 的独立系统 Batch，业务结果仍为 `NO_BATCH`。入库在提交前核对受影响 Item/叶仓的有效 SLE 与 Bundle 分配、Batch 总量和 Bin 汇总。操作日志把业务行连到原生明细。
+
+正式员工写入等待 B01、B03 与 B12 确认。V1-09 可复用执行内核和原生数量核对思路，并增加指定批次的可用量、扣减校验与出向 Bundle 适配。

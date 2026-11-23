@@ -71,9 +71,13 @@ def snapshot():
         from stock_probe import snapshot as stock_snapshot
 
         operations = stock_snapshot()
+    posted = {table: frappe.get_all(table, fields=["*"], order_by="name") for table in (
+        "Stock Entry", "Stock Entry Detail", "Serial and Batch Bundle", "Serial and Batch Entry",
+        "Stock Ledger Entry", "Bin", "GL Entry", "Payment Ledger Entry", "Repost Item Valuation",
+    )}
     return {"access": access, "batch": batch, "operations": operations, "schema": schema, "rows": rows,
             "patches": logs, "catalog": catalog, "sku": sku,
-            "warehouse": warehouse}
+            "warehouse": warehouse, "posted": posted}
 
 
 def main(action, site):
@@ -135,6 +139,10 @@ def main(action, site):
             from stock_probe import run, verify_persisted
 
             run(site) if action == "stock-execution" else verify_persisted()
+        elif action in {"receipt-seed", "receipt-execution"}:
+            from receipt_probe import run, seed
+
+            seed() if action == "receipt-seed" else run(site)
         elif action == "access-http":
             from access_probe import verify_http
 

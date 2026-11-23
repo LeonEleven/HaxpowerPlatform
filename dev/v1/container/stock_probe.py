@@ -514,7 +514,8 @@ def verify_persisted():
     requests = state[store.REQUEST]["rows"]
     links = state[store.LINK]["rows"]
     require(requests and len(requests) == len(state[store.LOG]["rows"])
-            and len(links) == len(state[store.SYNTHETIC_DETAIL]["rows"])
+            and len([link for link in links if link.detail_type == store.SYNTHETIC_DETAIL])
+            == len(state[store.SYNTHETIC_DETAIL]["rows"])
             and {link.operation_id for link in links} == {req.result_operation for req in requests},
             "persisted stock execution records have missing references")
     for req in requests:

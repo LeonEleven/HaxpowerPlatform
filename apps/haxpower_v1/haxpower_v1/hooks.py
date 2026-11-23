@@ -93,6 +93,9 @@ for _doctype in _STOCK_DOCUMENTS:
 doc_events["Stock Entry"]["before_insert"] = [f"{_warehouse_adapter}.guard_stock_entry", _stock_guard]
 doc_events["Stock Ledger Entry"]["before_insert"] = [f"{_warehouse_adapter}.guard_transit_posting", _stock_guard]
 doc_events["Batch"]["before_save"] = _stock_guard
+extend_doctype_class["Serial and Batch Bundle"].append(
+    "haxpower_v1.adapters.erpnext.receipt.ReceiptBundlePermissions"
+)
 
 for _doctype in _MAINTENANCE_DOCUMENTS:
     doc_events[_doctype] = dict.fromkeys((

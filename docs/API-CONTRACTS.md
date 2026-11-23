@@ -167,3 +167,9 @@ V1-07 的内部执行契约按站点、Company、当前认证主体、命令及�
 小程序使用服务端登录/授权交换机制。 - 不在小程序前端存放管理员 API
 Key/Secret。 - 外部集成使用独立服务账号和最小权限。 - 支持 Token
 撤销、轮换和审计。
+
+## 10. V1-08 内部入库 DTO
+
+Bench 中的内部接口为 `haxpower_v1.inventory.receipt.service.create_draft` 和 `submit`。草稿行要求 SKU ID、目标库位 ID、库存 UOM、Decimal 字符串，以及 `{"mode":"BATCH","batchNo":"STD61"}` 或 `{"mode":"NO_BATCH"}`。草稿响应生成稳定单据 ID、版本和行 ID。提交携带草稿及幂等键，返回单据 ID、操作 ID、最终状态、版本和领域行。员工 HTTP 入口关闭。业务响应使用领域批次选择和 ID。
+
+同一认证主体对同一操作的同键等效负载取得原结果。更改同键负载返回冲突。单据一旦生效，其他键也无法使其再次入库。授权在重放前重新检查。

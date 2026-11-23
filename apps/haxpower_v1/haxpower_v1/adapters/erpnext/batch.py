@@ -60,15 +60,15 @@ def allows_mapping_insert(doc):
     )
 
 
-def create_mapping(sku, batch_id, selection, policy_version):
+def create_mapping(sku, batch_id, selection, policy_version, *, authorize=require_candidate_writer):
     """Insert both records under the same actor and caller-owned savepoint."""
-    require_candidate_writer(sku)
+    authorize(sku)
     native_name = _native_name(batch_id, selection.kind)
     if frappe.db.get_value(BATCH, native_name, for_update=True):
         raise BatchError("BATCH_RESERVED_NAME_CONFLICT")
 
     with native_write(
-        lambda: require_candidate_writer(sku), service=BATCH_SERVICE, native_name=native_name,
+        lambda: authorize(sku), service=BATCH_SERVICE, native_name=native_name,
         domain_id=batch_id, existing=False, sku_id=sku.name,
     ):
         native = frappe.get_doc(doctype=BATCH, item=sku.native_item, batch_id=native_name, disabled=0)

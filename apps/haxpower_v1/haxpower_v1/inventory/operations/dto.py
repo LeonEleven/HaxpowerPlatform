@@ -32,6 +32,7 @@ class Line:
     target: str | None = None
     reason: str = ""
     notes: str = ""
+    batch_no: str | None = None
 
 
 @dataclass(frozen=True)

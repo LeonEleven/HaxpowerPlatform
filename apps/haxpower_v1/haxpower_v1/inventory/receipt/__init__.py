@@ -1,0 +1,1 @@
+"""Internal Material Receipt workflow."""

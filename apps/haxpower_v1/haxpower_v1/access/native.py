@@ -2,7 +2,7 @@
 
 import frappe
 
-from ..adapters.erpnext import batch, item, warehouse
+from ..adapters.erpnext import batch, item, receipt, warehouse
 from ..catalog.sku_persistence import SKU
 from ..warehouse.persistence import LOCATION
 from .policy import deny
@@ -26,6 +26,11 @@ def _references(doc, *, locked):
 
 
 def guard_stock_document(doc, method=None, *, target=None, merge=False):
+    if receipt.allows_write(doc, method):
+        doc.flags.notify_update = False
+        if doc.doctype == receipt.ENTRY:
+            doc.flags.ignore_version = True
+        return
     previous = doc.get_doc_before_save()
     if doc.doctype == "Batch":
         if batch.allows_batch_insert(doc, method):

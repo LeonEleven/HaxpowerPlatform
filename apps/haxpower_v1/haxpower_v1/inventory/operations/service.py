@@ -24,6 +24,7 @@ class Plan:
     command: Command
     source_demand: dict
     target_demand: dict
+    locations: dict
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,7 @@ class Action:
     authorize: Callable
     apply: Callable[[Plan], tuple[NativeLink, ...]]
     verify_reference: Callable[[Plan, NativeLink], bool]
+    resolve_batches: Callable | None = None
 
 
 def _digest(value):
@@ -56,7 +58,7 @@ def _text(value, limit, *, required=False):
         raise StockError("STOCK_INVALID_TEXT") from None
 
 
-def _shape(command):
+def _shape(command, action):
     _text(command.company, 140, required=True)
     _text(command.reason, 4000)
     _id(command.document_id)
@@ -84,7 +86,14 @@ def _shape(command):
                 _id(location)
         if line.batch_kind not in (BatchKind.NO_BATCH, BatchKind.BATCH):
             raise StockError("STOCK_EXPLICIT_BATCH_REQUIRED")
-        if line.batch_id is not None or line.batch_kind == BatchKind.BATCH:
+        if action.resolve_batches:
+            if line.batch_id is not None or (line.batch_no is not None) != (line.batch_kind == BatchKind.BATCH):
+                raise StockError("STOCK_EXPLICIT_BATCH_REQUIRED")
+            if line.batch_no is not None:
+                _text(line.batch_no, 80, required=True)
+        elif line.batch_no is not None:
+            raise StockError("STOCK_INVALID_BATCH")
+        elif line.batch_id is not None or line.batch_kind == BatchKind.BATCH:
             _id(line.batch_id)
         _text(line.uom, 140, required=True)
         _text(line.reason, 4000)
@@ -107,29 +116,33 @@ def _request_identity(command, actor, action):
 def _payload(command, actor, action):
     payload = asdict(command)
     del payload["idempotency_key"]
+    for line in payload["lines"]:
+        if line["batch_no"] is None:
+            del line["batch_no"]
     return _digest({"format": 1, "actor": actor, "command": action.name, "payload": payload})
 
 
 def _authorize(company, lines, action):
-    policy.lock_execution_locations(company, (
+    locations = policy.lock_execution_locations(company, (
         location for line in lines for location in (line.source, line.target) if location is not None
     ))
     action.authorize(company)
+    return locations
 
 
 def _resources(command, action):
     try:
         skus = {sku_id: _load_sku(sku_id, locked=True) for sku_id in sorted({line.sku_id for line in command.lines})}
-        for sku_id, kind, batch_id in sorted({
-            (line.sku_id, line.batch_kind, line.batch_id or "") for line in command.lines
-        }, key=lambda entry: (entry[2], entry[0], entry[1])):
-            lock_execution_mapping(skus[sku_id], kind, batch_id or None)
+        if not action.resolve_batches:
+            for sku_id, kind, batch_id in sorted({
+                (line.sku_id, line.batch_kind, line.batch_id or "") for line in command.lines
+            }, key=lambda entry: (entry[2], entry[0], entry[1])):
+                lock_execution_mapping(skus[sku_id], kind, batch_id or None)
     except BatchError as error:
         raise StockError(error.code) from None
     for line in command.lines:
         quantity_text(line.quantity, line.uom, sku=skus[line.sku_id], sign=action.quantity_sign, limits=action.limits)
-    return Plan(command, sum_demands(command.company, command.lines, location_field="source"),
-                sum_demands(command.company, command.lines, location_field="target"))
+    return skus
 
 
 def _document(command, action):
@@ -142,12 +155,13 @@ def _document(command, action):
         policy.deny()
     rows = frappe.db.get_values(store.LINE, {"document_id": document.name}, (
         "name", "line_no", "sku_id", "quantity", "uom", "batch_kind", "batch_id", "source", "target", "reason", "notes",
+        "batch_no",
     ), for_update=True, as_dict=True, order_by="name asc")
     if not rows:
         raise StockError("STOCK_DOCUMENT_INCONSISTENT")
     lines = tuple(Line(
         row.name, row.line_no, row.sku_id, row.quantity, row.uom, row.batch_kind,
-        row.batch_id, row.source, row.target, row.reason or "", row.notes or "",
+        row.batch_id, row.source, row.target, row.reason or "", row.notes or "", row.batch_no or None,
     ) for row in rows)
     return document, lines
 
@@ -211,7 +225,7 @@ def _stage(database, command, action, *, recovery):
         return _replay(request, document, _payload(command, actor, action)), False
 
     document, stored_lines = _document(command, action)
-    _authorize(command.company, stored_lines, action)
+    locations = _authorize(command.company, stored_lines, action)
     if recovery:
         raise StockError("STOCK_RETRY_REQUIRED")
     if document.status != "Draft" or document.effective_operation is not None:
@@ -226,11 +240,14 @@ def _stage(database, command, action, *, recovery):
     store.insert(store.REQUEST, name=request_id, company=command.company, actor=actor, command=action.name,
                  idempotency_key=command.idempotency_key, key_digest=key_digest,
                  payload_digest=_payload(command, actor, action), document_id=document.name, status="Pending")
-    plan = _resources(command, action)
+    skus = _resources(command, action)
     if command.lines != stored_lines:
         raise StockError("STOCK_DOCUMENT_PAYLOAD_MISMATCH")
 
-    with adapter_transaction(database):
+    with adapter_transaction(database, native_receipt=bool(action.resolve_batches)):
+        resolved = action.resolve_batches(command, skus) if action.resolve_batches else command
+        plan = Plan(resolved, sum_demands(command.company, resolved.lines, location_field="source"),
+                    sum_demands(command.company, resolved.lines, location_field="target"), locations)
         links = action.apply(plan)
         _check_links(plan, action, links)
 
@@ -246,7 +263,7 @@ def _stage(database, command, action, *, recovery):
 
 
 def _execute(command, action, *, before_guard=None, commit=None):
-    command = _canonical(_shape(command))
+    command = _canonical(_shape(command, action))
     unconfirmed_commit = False
     try:
         with connection() as database:
@@ -287,7 +304,7 @@ def _commit(database):
 
 
 def _create_draft(command, action, *, notes=""):
-    command = _canonical(_shape(command))
+    command = _canonical(_shape(command, action))
     _text(notes, 4000)
     with connection() as database:
         lock_stock_writes(command.company)

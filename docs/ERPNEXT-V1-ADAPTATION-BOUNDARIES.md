@@ -74,3 +74,13 @@ V1-06 的 `b03-candidate-1` 源于 Stage 2B。它只在明确标记的合成样�
 
 [事务和后续接入](TECHNICAL-DESIGN.md#v1-07-库存执行内核)
 [批次模型](INVENTORY-MODEL.md) · [实验规范实现](../dev/erpnext-lab/haxpower_platform/haxpower_platform/batch_input.py)
+
+## V1-08 入库适配
+
+原生适配向 ERPNext v16.55.0 的 `Stock Entry.insert()` 与 `submit()` 提交 Material Receipt。每行设置原生目标叶仓、库存 UOM、单位换算率 1、受管 Item 和精确批次。锁定版本在 `make_bundle_using_old_serial_batch_fields` 生成独立的入向 Bundle，并在 SLE 的提交路径中提交它。入库的 NO_BATCH 行使用 SKU 独立的系统 Batch。用户输出保留领域批次选择。
+
+原有守卫仅在当前收货事务和已核准的原生对象上允许对应写入。普通员工原生 REST/Desk 和正式收货 HTTP 仍关闭。禁止正式 Stock Entry 或 Bundle 被普通路径取消、删除或改量。受控连接保留提前提交与任意回调的拒绝，兼容首次 Bin 创建的保存点及 Frappe 文档缓存失效机制。B01、B03、B12 仍需业务审定。
+
+锁定版 `update_entries_after.set_precision` 在未配置原生精度时为 SLE 累计量使用两位小数。合成站设定三位前，实测两行的有效 SLE 为 1.125 和 0.125，但 Bin 被逐次舍入为 1.26。明确配置三位后，累计量、有效 SLE、Bundle、Batch 和 Bin 对齐。适配器在过账前拒绝缺少原生精度或原生精度低于 SKU 精度的站点。 [ERPNext 锁定源码](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/stock_ledger.py#L765-L769)
+
+ERPNext 内置 Bundle 创建调用当前员工的文档权限检查。仅当 Bundle 指向该事务中的 Stock Entry 和原生明细，且 Item、叶仓、批次与数量均匹配时，允许创建、保存和提交。首次建 Bin 只兼容原生 `SAVEPOINT create_bin`。缓存失效在连接关闭后重复一次，事务中的新文档不进入共享 Redis 缓存。提交、回滚、DDL、其他回调及即时队列或实时发送保持受限。

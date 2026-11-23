@@ -106,9 +106,11 @@ def seed_existing():
 
 def verify_concurrency(site):
     original_stock = _stock_counts()
+    before = len(snapshot()["rows"])
     first, race_sku = [_sku_id(suffix) for suffix in ("A", "RACE")]
     _race(site, race_sku, NO_BATCH)
     _race(site, first, {"mode": "BATCH", "batchNo": "RACE-STD"})
-    require(len(snapshot()["rows"]) == len(snapshot()["native"]) == 7, "unexpected persisted Batch counts")
+    after = snapshot()
+    require(len(after["rows"]) == len(after["native"]) == before + 2, "unexpected persisted Batch counts")
     require(_stock_counts() == original_stock, "batch fixtures unexpectedly created stock or accounting records")
     print("Synthetic real/NO_BATCH mappings verified. Stock, Bundle, Bin and GL counts remained stable.", flush=True)
