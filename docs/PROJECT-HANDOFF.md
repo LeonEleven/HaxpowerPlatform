@@ -116,7 +116,7 @@ V1-04 的仓库和库位使用稳定 ID。每个库位独占同公司 ERPNext �
 worker 和 scheduler 烟测通过。B02、B04、B11 仍待确认。
 下一项 V1-06 接入正式批次映射和受控 Batch 操作。
 
-[V1-05 Draft PR](https://github.com/LeonEleven/HaxpowerPlatform/pulls?q=is%3Apr+head%3Afeat%2Fv1-05-warehouse-access-native-guards) · [权限设计](PERMISSIONS.md#10-v1-05-技术机制) · [入口矩阵](ERPNEXT-V1-ADAPTATION-BOUNDARIES.md#v1-05-原生入口矩阵) · [V1-05 验证](../dev/v1/README.md#v1-05-权限验证)
+[V1-05 Draft PR #18](https://github.com/LeonEleven/HaxpowerPlatform/pull/18) · [PR #18 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/18/checks) · [权限设计](PERMISSIONS.md#10-v1-05-技术机制) · [入口矩阵](ERPNEXT-V1-ADAPTATION-BOUNDARIES.md#v1-05-原生入口矩阵) · [V1-05 验证](../dev/v1/README.md#v1-05-权限验证)
 
 每次完成重要开发阶段时更新此节，记录日期、对应 PR 或提交、实际完成范围、验收证据、未决项及下一任务。PR 状态是带日期的核对结果，下一会话重新查询。
 
