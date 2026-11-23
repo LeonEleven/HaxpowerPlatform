@@ -81,7 +81,7 @@ B01–B12 均待确认。盘点冻结与截止、预留需求、留存、切换�
 
 ## 6. 当前项目进度
 
-**状态快照，2026-11-20（Asia/Shanghai）。** V1-01 PR #14、V1-02 PR #15 和 V1-03 PR #16 已合并。V1-03 交付品牌档案、独立 SKU 和 ERPNext Item/UOM 映射。V1-04 从 PR #16 的合并提交 `65e1992bed4a5ddaaf19d2096449ecf2b138055e` 开始，在 Draft PR #17 交付仓库、库位和原生叶仓映射。
+**状态快照，2026-11-23（Asia/Shanghai）。** V1-01 PR #14、V1-02 PR #15 和 V1-03 PR #16 已合并。V1-03 交付品牌档案、独立 SKU 和 ERPNext Item/UOM 映射。V1-04 从 PR #16 的合并提交 `65e1992bed4a5ddaaf19d2096449ecf2b138055e` 开始，在 PR #17 交付仓库、库位和原生叶仓映射。LeonEleven 于 2026-11-23 09:17 合并，基线提交为 `cc5dbd3ed3e62d6990dd06ab3ef021cfa3d2d582`。
 
 | 文档 | 当前范围 |
 | --- | --- |
@@ -102,9 +102,21 @@ V1-03 沿用 `catalog.service.get_specification(specification_id)` 的稳定 ID 
 
 **V1-04 迁移证据。** 空站结构与重跑快照一致。锁定 V1-03 版本的合成规格、审计、品牌、SKU 和 Item 映射从同一备份集恢复后重试升级，原记录和稳定 ID 可复核。升级站增加仓库、库位和在途后，两次 migrate 的本地快照 SHA-256 均为 `b1c35d23a4f6008486e9407589178e6fc3997dd6a31b2254a8930a637569d91c`。远端实测与脱敏日志见 PR #17 的 CI 检查。
 
-V1-04 的仓库和库位使用稳定 ID。每个库位独占同公司 ERPNext 原生叶仓，系统在途单独配置并从普通选择中排除。停用保持安全拒绝，等待库存引用及写入协调。B02 仍待确认。V1-04 通过评审后，下一项为 **V1-05 仓库授权和原生入口守卫**。在途发出、接收、部分接收与退回由 V1-10/V1-11 接入。
+V1-04 的仓库和库位使用稳定 ID。每个库位独占同公司 ERPNext 原生叶仓，系统在途单独配置并从普通选择中排除。停用保持安全拒绝，等待库存引用及写入协调。B02 仍待确认。V1-05 从 V1-04 的合并提交开始实现仓库授权和原生入口守卫。在途发出、接收、部分接收与退回由 V1-10/V1-11 接入。
 
-[V1-04 Draft PR #17](https://github.com/LeonEleven/HaxpowerPlatform/pull/17) · [PR #17 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/17/checks) · [V1-04 Backlog](V1-DEVELOPMENT-BACKLOG.md#v1-04-仓库与库位映射) · [V1-04 技术设计](TECHNICAL-DESIGN.md#v1-04-仓库库位与原生叶仓)
+[V1-04 PR #17](https://github.com/LeonEleven/HaxpowerPlatform/pull/17) · [PR #17 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/17/checks) · [V1-04 Backlog](V1-DEVELOPMENT-BACKLOG.md#v1-04-仓库与库位映射) · [V1-04 技术设计](TECHNICAL-DESIGN.md#v1-04-仓库库位与原生叶仓)
+
+**V1-05 权限基础。** 技术能力映射为未分配的 Frappe 角色，员工范围按所属公司和稳定领域 ID
+计算。受控读取返回最小投影，Frappe 认证后的入口清单及 ORM 守卫保护受管原生资源。
+本地锁定环境的空站及合成升级站各通过 39 项 Frappe 测试，含 30 项既有回归。真实 Cookie
+会话矩阵通过 94 项检查，其中 57 项拒绝。验证拒绝前后的领域、原生映射、库存及审计快照，
+并以独立 MariaDB 连接验证 SKU、叶仓和授权配置的并发一致性。
+升级从已合并的 V1-04 开始，注入故障、恢复数据库及公私文件后保留已有规格审计、SKU、Item、
+仓库、库位和在途映射。升级站两次迁移复跑快照一致。Web、Socket.IO、非法 Host、
+worker 和 scheduler 烟测通过。B02、B04、B11 仍待确认。
+下一项 V1-06 接入正式批次映射和受控 Batch 操作。
+
+[V1-05 Draft PR](https://github.com/LeonEleven/HaxpowerPlatform/pulls?q=is%3Apr+head%3Afeat%2Fv1-05-warehouse-access-native-guards) · [权限设计](PERMISSIONS.md#10-v1-05-技术机制) · [入口矩阵](ERPNEXT-V1-ADAPTATION-BOUNDARIES.md#v1-05-原生入口矩阵) · [V1-05 验证](../dev/v1/README.md#v1-05-权限验证)
 
 每次完成重要开发阶段时更新此节，记录日期、对应 PR 或提交、实际完成范围、验收证据、未决项及下一任务。PR 状态是带日期的核对结果，下一会话重新查询。
 

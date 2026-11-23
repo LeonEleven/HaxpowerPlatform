@@ -26,6 +26,26 @@
 - **失败和上线。** 意外取消、原单/Bundle 丢失或对账不符应阻断受影响的业务范围，保留证据，人工修复后重验。生产隔离和恢复演练仍待执行。
 [权限模型](PERMISSIONS.md) · [原生入口实测](STAGE1C-PERMISSION-BOUNDARY-REPORT.md) · [后台风险](STAGE1F-AUDIT-COUNT-REPORT.md)
 
+## V1-05 原生入口矩阵
+
+Frappe v16.55.0 的 `auth_hooks` 在 Cookie、API Key 和 OAuth 验证后应用专用站点
+入口清单。HTTP 开放登录、受控业务读取、Desk 壳及清单内的原生主数据操作。
+清单外 RPC、DocType 方法、网站视图与下载在分派之前统一拒绝。使用附加
+Stock User、Stock Manager 或 Item Manager 角色的用户仍经过同一规则。
+
+| 入口 | V1-05 规则与自动化检查 |
+| --- | --- |
+| REST v1/v2、`frappe.client`、Desk 表单及列表 | 受管 Item 和叶仓拒绝直接详情及写入，列表和计数排除受管记录。允许 Frappe 标准权限下未受管 Item、Warehouse、UOM、Item Group 和 Warehouse Type 的已审查操作。含受管引用的主数据详情拒绝。公司原生库存默认值、复杂查询、DocType 自定义方法、合并及动态链接查询保持关闭。 |
+| Stock Entry、Stock Reconciliation、Purchase Receipt、Purchase Invoice、Delivery Note、Sales Invoice 等 | 原生库存及上下游单据的 HTTP 读写均关闭。已登记 ORM 守卫扫描单据及明细的 Item、Warehouse 和 Batch 链接，包括更新前的引用，并在提交、取消与生命周期操作时阻止受管引用。 |
+| SLE、Bin、Batch、Serial No 和 Serial and Batch Bundle | HTTP 关闭。ORM 守卫识别受管 Item、库位、Batch 保留前缀及关联受管 Item 的批次。V1-06 将接入正式批次映射及受控执行。 |
+| 取消、删除、改名、导入和批量动作 | 受管资源的 HTTP 生命周期操作及全部原生库存导入、批量操作关闭。Item、Warehouse 映射生命周期另有 ORM 守卫。 |
+| Stock Balance、Stock Ledger、Prepared Report、打印、File、私有文件下载及导出 | HTTP 关闭。V1-15 接入按仓授权的报表与导出，V1-16 接入受控导入。公共静态文件目录仅承载公开页面资产，受限材料须按业务文件流程入库。 |
+| 账簿重估、公司交易清理、排队任务 | 原生重估与交易清理 HTTP 入口关闭。迁移停止已登记的原生重估、账簿改名、批量重试、补货和序列号维护计划。Worker 拒绝已登记的计划任务及队列调用，维护 DocType 在存在受管映射时拒绝 ORM 操作。生产队列和站点运维权限由 B11 逐项复核。 |
+
+合成验证命令及结果见 [V1 开发环境](../dev/v1/README.md#v1-05-权限验证)。校验结果覆盖
+在隔离站点实测的入口，V1-06、V1-15、V1-16、V1-19 的业务入口由对应任务负责。
+任意服务器代码、DBA 和恢复操作属于独立的信任边界。
+
 ## 批次输入规范
 
 这是供 V1 评审的规范。Stage 2B 实验按下表执行。批次大小写、上下游表格清洗策略及正式长度上限仍待确认。

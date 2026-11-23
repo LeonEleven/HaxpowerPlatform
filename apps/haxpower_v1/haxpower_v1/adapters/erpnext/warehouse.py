@@ -1,14 +1,12 @@
 """ERPNext v16 Warehouse mapping and lifecycle guards."""
 
-from contextlib import contextmanager
-from contextvars import ContextVar
-
 import frappe
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 from frappe.utils import cint
 
+from ...access.execution import allows_native_write, native_write
 from ...warehouse.dto import MappingDiagnostic
-from ...warehouse.persistence import LOCATION, TRANSIT, WAREHOUSE
+from ...warehouse.persistence import LOCATION, TRANSIT, WAREHOUSE, require_maintainer, require_system_operator
 
 NATIVE = "Warehouse"
 MARKER = "custom_hp_v1_location_id"
@@ -30,7 +28,7 @@ REFERENCES = (
     ("Delivery Note Item", "warehouse"),
     ("Item Default", "default_warehouse"),
 )
-_binding = ContextVar("hp_v1_native_warehouse_binding", default=None)
+WAREHOUSE_SERVICE = "Warehouse mapping"
 
 
 def ensure_schema():
@@ -71,6 +69,10 @@ def _parent(name, company, *, locked=False):
         return parent
 
 
+def operational_parent(warehouse):
+    return _company(warehouse.company) and _parent(warehouse.native_parent, warehouse.company)
+
+
 def validate_parent(company, parent_name):
     if not _company(company, locked=True):
         frappe.throw("Warehouse requires an existing operational ERPNext Company.")
@@ -89,20 +91,11 @@ def _leaf_matches(leaf, warehouse, parent):
     )
 
 
-@contextmanager
-def _allow_binding(name, location_id, *, existing):
-    token = _binding.set((name, location_id, existing))
-    # Keep native search and realtime side effects out of savepoint rollback.
-    previous = frappe.conf.get("disable_global_search")
-    frappe.conf["disable_global_search"] = True
-    try:
-        yield
-    finally:
-        if previous is None:
-            frappe.conf.pop("disable_global_search", None)
-        else:
-            frappe.conf["disable_global_search"] = previous
-        _binding.reset(token)
+def _allow_binding(name, location_id, warehouse, *, existing):
+    authorize = require_system_operator if warehouse.kind == TRANSIT else require_maintainer
+    return native_write(
+        authorize, service=WAREHOUSE_SERVICE, native_name=name, domain_id=location_id, existing=existing,
+    )
 
 
 def _native(name, *, locked=False):
@@ -122,7 +115,7 @@ def bind_location(warehouse, location_id, existing_name=None):
             **{MARKER: location_id},
         )
         leaf.flags.notify_update = False
-        with _allow_binding(leaf.warehouse_name, location_id, existing=False):
+        with _allow_binding(leaf.warehouse_name, location_id, warehouse, existing=False):
             leaf.insert(ignore_permissions=True)
         # NestedSet updates its bounds in the database during insertion.
         leaf = _native(leaf.name, locked=True)
@@ -135,7 +128,7 @@ def bind_location(warehouse, location_id, existing_name=None):
         check_references(leaf.name)
         leaf.set(MARKER, location_id)
         leaf.flags.notify_update = False
-        with _allow_binding(leaf.name, location_id, existing=True):
+        with _allow_binding(leaf.name, location_id, warehouse, existing=True):
             leaf.save(ignore_permissions=True)
 
     parent = validate_parent(warehouse.company, warehouse.native_parent)
@@ -194,10 +187,11 @@ def check_references(name):
             frappe.throw(f"The ERPNext Warehouse has a native reference in {doctype}.")
 
 
-def _marked(name, *, locked=False):
-    return name and (
-        frappe.db.get_value(NATIVE, name, MARKER, for_update=locked) or _forward_mapping(name, locked=locked)
-    )
+def managed_warehouse(name, *, locked=False):
+    return bool(name and (
+        (frappe.db.has_column(NATIVE, MARKER) and frappe.db.get_value(NATIVE, name, MARKER, for_update=locked))
+        or (frappe.db.table_exists(LOCATION) and _forward_mapping(name, locked=locked))
+    ))
 
 
 def _used_parent(name):
@@ -211,9 +205,11 @@ def _deny_warehouse_change():
 
 def guard_change(doc, method=None):
     existing = not doc.is_new()
-    if _binding.get() == (doc.name if existing else doc.warehouse_name, doc.get(MARKER), existing):
+    if allows_native_write(
+        WAREHOUSE_SERVICE, doc.name if existing else doc.warehouse_name, doc.get(MARKER), existing=existing,
+    ):
         return
-    if doc.get(MARKER) or (existing and _marked(doc.name, locked=True)):
+    if doc.get(MARKER) or (existing and managed_warehouse(doc.name, locked=True)):
         _deny_warehouse_change()
     if existing and any(doc.has_value_changed(field) for field in PARENT_FIELDS) and _used_parent(doc.name):
         _deny_warehouse_change()
@@ -221,14 +217,14 @@ def guard_change(doc, method=None):
 
 def guard_rename(doc, method, old, new, merge=False):
     for name in (old, new) if merge else (old,):
-        if _marked(name, locked=True) or _used_parent(name):
+        if managed_warehouse(name, locked=True) or _used_parent(name):
             _deny_warehouse_change()
 
 
 class WarehouseLifecycle:
     def on_trash(self):
         # Execute before ERPNext's own deletion cleanup touches Bin or the tree.
-        if _marked(self.name, locked=True) or _used_parent(self.name):
+        if managed_warehouse(self.name, locked=True) or _used_parent(self.name):
             _deny_warehouse_change()
         super().on_trash()
 
@@ -258,7 +254,7 @@ def guard_warehouse_type_identity(doc, method, old, new, merge=False):
     for name in (old, new) if merge else (old,):
         if frappe.db.get_value("Warehouse Type", name, for_update=True):
             leaves = frappe.db.get_values(NATIVE, {"warehouse_type": name}, "name", for_update=True)
-            if any(_marked(leaf, locked=True) or _used_parent(leaf) for leaf in leaves):
+            if any(managed_warehouse(leaf, locked=True) or _used_parent(leaf) for leaf in leaves):
                 _deny_warehouse_change()
 
 
@@ -267,7 +263,7 @@ def guard_warehouse_type_trash(doc, method=None):
 
 
 def native_warehouse_permission(doc, user=None):
-    return (user or frappe.session.user) == "Administrator" or not _marked(doc.name)
+    return (user or frappe.session.user) == "Administrator" or not managed_warehouse(doc.name)
 
 
 def native_warehouse_query(user=None):
@@ -280,21 +276,10 @@ def native_warehouse_query(user=None):
     )
 
 
-def guard_sharing(doc, method=None):
-    previous = doc.get_doc_before_save()
-    for share in (doc, previous):
-        if share and (
-            share.share_doctype in (WAREHOUSE, LOCATION)
-            or (share.share_doctype == NATIVE and _marked(share.share_name, locked=True))
-        ):
-            frappe.throw("Warehouse data access must be granted through the V1 permission service.",
-                         frappe.PermissionError)
-
-
 def _reject_transit(name):
     # V1-04 provisions transit atomically and never adopts an existing transit
     # leaf. Unrelated native stock posting does not need mapping locks.
-    if name and (location := _forward_mapping(name)):
+    if name and frappe.db.table_exists(LOCATION) and (location := _forward_mapping(name)):
         if frappe.db.get_value(WAREHOUSE, location.warehouse, "kind") == TRANSIT:
             frappe.throw("V1 system transit can only be used by the future controlled transfer service.",
                          frappe.PermissionError)
