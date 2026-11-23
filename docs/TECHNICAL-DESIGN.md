@@ -196,3 +196,11 @@ V1-08 的入库动作需把 API DTO 解析成领域单据和稳定行，由当�
 原生写入上下文绑定当前员工、领域单据、Company、原生 Stock Entry 实例及逐行核准的 Item、Warehouse、Batch 和数量。ERPNext 把明确指定的行批次转换为入向 Bundle，并在 SLE 提交链中提交 Bundle。适配器在同一事务核对原生明细、Bundle、有效 SLE、Batch 和 Bin，随后由执行内核记录操作及行链接。既有 V1-07 请求摘要继续使用原格式。
 
 V1-09 可复用共用事务内的权限、行关联、批次解析和库存核对原则。出库需对合计后的指定桶做可用量当前读，并实现独立的出向上下文与原生校验。
+
+## V1-09 多行 Material Issue
+
+`inventory.issue.service` 在共用库存事务中校验 ISSUE 权限、源仓范围、SKU、物理库位和已有批次映射。V1-07 `Plan.source_demand` 使用 Decimal 合计相同桶的行。库存 guard 后以锁定读取核对 SLE、Bundle、Batch 和 Bin。Material Issue 事务使用 MariaDB READ COMMITTED，使 ERPNext 的普通查询在等待锁后同时取得最新的已提交数量和估值。
+
+`adapters.erpnext.issue` 用 ERPNext 原生 Stock Entry 创建和提交 Material Issue。每行绑定精确的批次和源叶仓。两种 Stock Entry 动作共享出入方向校验、原生作用域与逐行对账，继续使用 V1-08 的缓存、回调、队列与即时消息保护。数量、会计和业务事实在同一事务内提交，断连按原幂等键恢复结果。
+
+V1-10 可复用 `Plan.source_demand`、源桶核对和 Outward Bundle 的符号、批次和明细校验。源目标双权限、在途归属和两阶段状态由移库任务接入。B01 数量参数、B03 批次规范、B08 日志保留、B09 预留与 B12 估值和维护上线条件均待确认。

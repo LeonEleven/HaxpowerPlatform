@@ -143,6 +143,10 @@ def main(action, site):
             from receipt_probe import run, seed
 
             seed() if action == "receipt-seed" else run(site)
+        elif action in {"issue-execution", "issue-reconcile-history"}:
+            from issue_probe import run, verify_receipts
+
+            run(site) if action == "issue-execution" else verify_receipts()
         elif action == "access-http":
             from access_probe import verify_http
 

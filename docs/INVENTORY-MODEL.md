@@ -131,3 +131,11 @@ InventoryValuationLayer、InventoryCostEntry、StockValuationAdjustment。数量
 ERPNext 为每条业务行生成一条 Stock Entry Detail、一个已提交的入向 Bundle 和一条有效 SLE。即使两行是同一库存桶，原生明细也分别保留。无批次使用该 SKU 的独立系统 Batch，业务结果仍为 `NO_BATCH`。入库在提交前核对受影响 Item/叶仓的有效 SLE 与 Bundle 分配、Batch 总量和 Bin 汇总。操作日志把业务行连到原生明细。
 
 正式员工写入等待 B01、B03 与 B12 确认。V1-09 可复用执行内核和原生数量核对思路，并增加指定批次的可用量、扣减校验与出向 Bundle 适配。
+
+## 13. V1-09 多行出库与可用量
+
+出库草稿固定每行的 SKU、源库位、批次选择及库存 UOM。真实批次使用已有领域 Batch ID。明确的无批次库存使用 `NO_BATCH`，领域 Batch ID 为空。适配层将该选择映射到 SKU 专属系统 Batch。提交重新核对映射和每个源仓的员工授权。
+
+可用量是已提交的物理数量，按公司、SKU、物理叶库位和领域批次计算。适配层以有效 SLE 和对应已提交 Bundle 的带符号数量为事实，核对逐桶汇总、原生 Batch 总量和 Bin 的 SKU 库位汇总。缺失关联、映射漂移、小数精度不符或余额不一致会阻断出库。B09 库存预留待确认。
+
+同桶各行先合计需求。持有共用库存写入锁后重新读取源桶，每个桶独立判断库存是否充足。ERPNext Material Issue 将业务行对应到负向 SLE 和 Outward Bundle。指定桶刚好扣完时仍可核对到零。未选中的真实批次、无批次、品牌 SKU 和库位数量须保持原值。

@@ -84,3 +84,11 @@ V1-06 的 `b03-candidate-1` 源于 Stage 2B。它只在明确标记的合成样�
 锁定版 `update_entries_after.set_precision` 在未配置原生精度时为 SLE 累计量使用两位小数。合成站设定三位前，实测两行的有效 SLE 为 1.125 和 0.125，但 Bin 被逐次舍入为 1.26。明确配置三位后，累计量、有效 SLE、Bundle、Batch 和 Bin 对齐。适配器在过账前拒绝缺少原生精度或原生精度低于 SKU 精度的站点。 [ERPNext 锁定源码](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/stock_ledger.py#L765-L769)
 
 ERPNext 内置 Bundle 创建调用当前员工的文档权限检查。仅当 Bundle 指向该事务中的 Stock Entry 和原生明细，且 Item、叶仓、批次与数量均匹配时，允许创建、保存和提交。首次建 Bin 只兼容原生 `SAVEPOINT create_bin`。缓存失效在连接关闭后重复一次，事务中的新文档不进入共享 Redis 缓存。提交、回滚、DDL、其他回调及即时队列或实时发送保持受限。
+
+## V1-09 出库适配
+
+Material Issue 通过 `Stock Entry.insert()` 和 `submit()` 过账。每行业务数量为正，库存 UOM 换算率为 1，显式填写 `s_warehouse`、`use_serial_batch_fields=1` 和已验证的 `batch_no`。锁定版的 `StockController.update_bundle_details` 将指定 Batch 传为单项批次集合，`SerialBatchCreation` 使用该集合生成 Outward Bundle 和负向子行。适配器核对明细、Bundle、SLE 的批次、归属、方向、数量及稳定引用。Stock Settings、Item 或目标 Batch 启用负库存时拒绝提交。[Stock Controller 源码](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/controllers/stock_controller.py#L817-L889) · [Bundle 源码](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/serial_batch_bundle.py#L1370-L1412)
+
+原生受控范围绑定当前员工、业务单、Stock Entry 及明细。已有的数量出处须能与已提交 Bundle、Batch 总量、Bin 和精度互相核对，才能出库。ERPNext 继续执行原生估值和关闭期间检查。允许财务候选配置的权限仅用于独立合成环境。普通员工原生 REST/Desk、取消、删除、维护和后台重估继续受原守卫约束。
+
+出库估值使用 ERPNext 从源库存计算的原生费率。锁定版本的批次估值探针从 Detail 的估值率和 Bundle 子行的 `incoming_rate` 取费率，从 Bundle 子行及 SLE 取库存价值变动，并与凭证 GL 借贷核对。该路径的 SLE `outgoing_rate` 为零。

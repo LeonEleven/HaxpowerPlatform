@@ -19,7 +19,7 @@ _cache_patches = None
 
 
 @contextmanager
-def connection():
+def connection(*, read_committed=False):
     if _adapter_active.get():
         raise StockError("STOCK_ADAPTER_SIDE_EFFECT")
     previous = frappe.local.db
@@ -29,6 +29,10 @@ def connection():
         frappe.local.db = previous
         raise StockError("STOCK_DATABASE_UNSUPPORTED")
     try:
+        if read_committed:
+            # ERPNext uses ordinary reads for availability and valuation. Refresh
+            # those reads after waiting on the shared stock-write lock.
+            database.sql("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
         database.sql("START TRANSACTION")
         yield database
     finally:
@@ -37,7 +41,7 @@ def connection():
             database.close()
         finally:
             frappe.local.db = previous
-            for (doctype, _), callback in getattr(database, "hp_receipt_cache_invalidations", {}).items():
+            for (doctype, _), callback in getattr(database, "hp_stock_cache_invalidations", {}).items():
                 previous.value_cache.pop(doctype, None)
                 callback()
 
@@ -125,7 +129,7 @@ def _native_orm(reject):
 
 
 @contextmanager
-def adapter_transaction(database, *, native_receipt=False):
+def adapter_transaction(database, *, native_orm=False):
     """Reject nested transaction boundaries and deferred Frappe callbacks."""
     violated = False
 
@@ -152,13 +156,13 @@ def adapter_transaction(database, *, native_receipt=False):
             ):
                 reject()
             doctype, name = (cell.cell_contents for cell in callback.__closure__)
-            database.hp_receipt_cache_invalidations[doctype, name] = callback
+            database.hp_stock_cache_invalidations[doctype, name] = callback
 
     def guarded_sql(query, *args, **kwargs):
         # SQL templates must contain a single transactional DML statement.
         # The database driver binds values separately.
         text = str(query)
-        if native_receipt and text.lower() == "savepoint create_bin" and not args and not kwargs:
+        if native_orm and text.lower() == "savepoint create_bin" and not args and not kwargs:
             # ERPNext uses this savepoint when creating a first Bin. A
             # collision must fail the whole command under the site lock.
             return original_sql(query)
@@ -170,9 +174,9 @@ def adapter_transaction(database, *, native_receipt=False):
 
     replace = dict.fromkeys(("commit", "rollback", "begin", "close", "connect", "sql_ddl"), reject)
     replace.update({name: RejectCallbacks() for name in callbacks})
-    if native_receipt:
+    if native_orm:
         replace.update(after_commit=CacheCallbacks(), after_rollback=CacheCallbacks())
-        database.hp_receipt_cache_invalidations = {}
+        database.hp_stock_cache_invalidations = {}
     replace["sql"] = guarded_sql
     originals = {name: getattr(database, name) for name in replace}
     token = _adapter_active.set(True)
@@ -180,7 +184,7 @@ def adapter_transaction(database, *, native_receipt=False):
         for name, method in replace.items():
             setattr(database, name, method)
         with ExitStack() as stack:
-            if native_receipt:
+            if native_orm:
                 stack.enter_context(_native_orm(reject))
             yield
         if violated or not original_sql("SELECT @@in_transaction")[0][0]:

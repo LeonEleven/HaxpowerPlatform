@@ -173,3 +173,11 @@ Key/Secret。 - 外部集成使用独立服务账号和最小权限。 - 支持 
 Bench 中的内部接口为 `haxpower_v1.inventory.receipt.service.create_draft` 和 `submit`。草稿行要求 SKU ID、目标库位 ID、库存 UOM、Decimal 字符串，以及 `{"mode":"BATCH","batchNo":"STD61"}` 或 `{"mode":"NO_BATCH"}`。草稿响应生成稳定单据 ID、版本和行 ID。提交携带草稿及幂等键，返回单据 ID、操作 ID、最终状态、版本和领域行。员工 HTTP 入口关闭。业务响应使用领域批次选择和 ID。
 
 同一认证主体对同一操作的同键等效负载取得原结果。更改同键负载返回冲突。单据一旦生效，其他键也无法使其再次入库。授权在重放前重新检查。
+
+## 11. V1-09 内部出库 DTO
+
+`haxpower_v1.inventory.issue.service.create_draft` 接收 `IssueDraftInput`。每行提供 `sku_id`、`source_location_id`、`batch`、Decimal 字符串 `quantity`、库存 `uom`，以及业务原因和备注字段。批次选择为 `{"mode":"BATCH","batchNo":"STD61"}` 或 `{"mode":"NO_BATCH"}`，均要求已有映射。草稿返回稳定单据 ID、版本和行 ID。
+
+`submit(SubmitIssue)` 需要草稿及幂等键。响应包含单据 ID、操作 ID、状态、版本及原行的领域信息。同键同负载在重新授权后返回原结果。并发竞争中，无法满足任一源桶需求的请求返回 `INSUFFICIENT_STOCK` 并回滚。未知或漂移的批次映射返回 `BATCH_MAPPING_UNAVAILABLE`。原生数量事实存在差异时返回 `ISSUE_NATIVE_RECONCILIATION_FAILED`。
+
+`get_availability(company, sku_id, source_location_id, batch)` 检查 ISSUE 操作权限及源仓范围，返回指定桶的 Decimal 数量字符串、库存 UOM 和领域标识。无批次返回 `batch=null`。合同中的三个接口目前仅由明确启用的独立合成 Bench 使用。员工 HTTP 写入口待 B01、B03、B12 和正式授权确认。
