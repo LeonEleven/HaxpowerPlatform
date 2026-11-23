@@ -51,7 +51,13 @@ def snapshot():
         from sku_probe import snapshot as sku_snapshot
 
         sku = sku_snapshot()
-    return {"schema": schema, "rows": rows, "patches": logs, "catalog": catalog, "sku": sku}
+    warehouse = {}
+    if frappe.db.table_exists("HP V1 Warehouse"):
+        from warehouse_probe import snapshot as warehouse_snapshot
+
+        warehouse = warehouse_snapshot()
+    return {"schema": schema, "rows": rows, "patches": logs, "catalog": catalog, "sku": sku,
+            "warehouse": warehouse}
 
 
 def main(action, site):
@@ -85,6 +91,18 @@ def main(action, site):
             from catalog_probe import verify_native_denials
 
             verify_native_denials(site)
+        elif action == "verify-skus":
+            from sku_probe import verify_seed
+
+            verify_seed()
+        elif action == "seed-warehouses":
+            from warehouse_probe import seed
+
+            seed()
+        elif action in {"warehouse-concurrency", "warehouse-http"}:
+            from warehouse_probe import verify_concurrency, verify_http
+
+            (verify_concurrency if action == "warehouse-concurrency" else verify_http)(site)
         else:
             raise ValueError("unknown probe action")
     finally:
