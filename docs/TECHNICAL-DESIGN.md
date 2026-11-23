@@ -114,7 +114,14 @@ ID、SKU、批次选择模式、库存位置和单据状态；适配层负责映
   已登记的原生库存维护计划保持停止，worker 在执行前检查队列方法及 DocType。
   路由、ORM 和后台守卫范围及后续启用条件见
   [原生入口矩阵](ERPNEXT-V1-ADAPTATION-BOUNDARIES.md#v1-05-原生入口矩阵)。
-  V1-06 在 Batch 识别扩展点接入持久映射，受控批次和库存写入须各自取得范围与执行授权。
+  V1-06 在 Batch 识别扩展点接入持久映射，受控批次和库存写入各自具有范围与执行授权。
+
+### V1-06 批次映射和事务
+
+- `inventory.batch.normalization.normalize_selection` 验证三态并返回类型化选择。实批次规则保留原文、候选值及版本。ASCII 十六进制键按 Unicode 码点定长编码，MariaDB 的大小写或重音排序规则不会丢失字符差异。无批次用固定非空哨兵。表约束保证身份键非空、系统桶唯一及原生 Batch 一对一。
+- `inventory.batch.service` 提供 `preview_selection`、`resolve_or_create`、`resolve_existing` 和 `get_batch`。通过 SKU 行锁和当前读取协调并发创建。Item 启用、原生 Batch 插入和领域映射在调用方事务及同一保存点中，服务返回稳定 ID 和是否新建。失败回滚到保存点，调用方负责提交或重试。
+- ERPNext 适配器从稳定映射 ID 解析原生 Batch，验证两个方向、启用状态及修订漂移。`resolve_native_batch` 在事务内重新验证和锁定，`diagnose_mappings` 是站点管理员的 Bench 诊断。Batch 创建复用 V1-05 的当前身份执行上下文，并绑定 SKU、映射和原生记录。创建以外的原生生命周期仍受库存守卫保护。
+- V1-07 在共用事务入口接入仓库和操作授权并管理锁及重试。V1-08 入库复用预览与创建接口。V1-09 出库按已选领域身份或明确库存桶查找既有映射，并在原生记账前复核。同一单据多桶的锁顺序在 V1-07 验证。B03 确认及业务授权接入前，候选写入限明确配置的隔离站点、合成 SKU 和 Bench 管理员。
 
 ## 6. 库存事务
 

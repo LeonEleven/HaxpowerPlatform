@@ -44,9 +44,10 @@ def record(label, snapshot):
     sku_rows = sum(len(table["rows"]) for table in sku_tables.values())
     warehouse_rows = sum(len(table["rows"]) for table in snapshot["warehouse"].get("tables", {}).values())
     access_rows = sum(len(table["rows"]) for table in snapshot["access"].get("tables", {}).values() if table)
+    batch_rows = len(snapshot["batch"].get("rows", ()))
     print(f"{label}: sha256={digest} rows={len(snapshot['rows'])} "
           f"patch_records={len(snapshot['patches'])} catalog_rows={catalog_rows} sku_rows={sku_rows} "
-          f"warehouse_rows={warehouse_rows} access_rows={access_rows}", flush=True)
+          f"warehouse_rows={warehouse_rows} access_rows={access_rows} batch_rows={batch_rows}", flush=True)
 
 
 def verify_catalog_schema(state):
@@ -74,6 +75,14 @@ def verify_access_schema(state):
             access["tables"].values()), "access schema missing or automatically seeded")
     require(len(access["roles"]) == 12 and all(not role["desk_access"] and not role["disabled"]
             for role in access["roles"]) and not access["assignments"], "employee capability roles were auto-assigned")
+
+
+def verify_batch_schema(state):
+    batch = state["batch"]
+    require(batch and not batch["rows"] and not batch["native"]
+            and all(name in batch["schema"] for name in (
+                "hp_v1_batch_identity", "hp_v1_batch_native", "hp_v1_batch_required_identity",
+            )), "Batch schema or constraints missing, or data automatically seeded")
 
 
 def repeat_migration(target, snapshot):
@@ -151,6 +160,7 @@ def integration():
     verify_sku_schema(clean)
     verify_warehouse_schema(clean)
     verify_access_schema(clean)
+    verify_batch_schema(clean)
     record("clean install and first migration", clean)
     repeat_migration(SITE, clean)
     rehearse_upgrade(clean)
@@ -167,7 +177,7 @@ def rehearse_upgrade(clean):
         inspect("seed", UPGRADE)
         previous = inspect("snapshot", UPGRADE)
         require(len(previous["rows"]) == 1 and not previous["patches"] and not previous["catalog"]
-                and not previous["sku"] and not previous["warehouse"] and not previous["access"]
+                and not previous["sku"] and not previous["warehouse"] and not previous["access"] and not previous["batch"]
                 and "baseline_revision" not in previous["schema"],
                 "unexpected previous fixture state")
         record(f"synthetic previous release {FIXTURE_VERSION}", previous)
@@ -183,43 +193,49 @@ def rehearse_upgrade(clean):
             baseline = Path(path) / "apps/haxpower_v1"
             deploy_app(fixture=baseline)
             version = run(PYTHON, "-c", "import haxpower_v1; print(haxpower_v1.__version__)", capture=True)
-            require(version.strip() == "0.5.0", "expected the merged V1-04 app")
+            require(version.strip() == "0.6.0", "expected the merged V1-05 app")
             site_command("migrate", target=UPGRADE)
-            v104_empty = inspect("snapshot", UPGRADE)
-            verify_upgraded(v104_empty, previous)
-            verify_sku_schema(v104_empty)
-            verify_warehouse_schema(v104_empty)
-            require(not v104_empty["access"], "access schema unexpectedly exists on V1-04")
+            baseline_empty = inspect("snapshot", UPGRADE)
+            verify_upgraded(baseline_empty, previous)
+            verify_sku_schema(baseline_empty)
+            verify_warehouse_schema(baseline_empty)
+            verify_access_schema(baseline_empty)
+            require(not baseline_empty["batch"], "Batch mapping unexpectedly exists on V1-05")
             inspect("seed-catalog", UPGRADE)
             inspect("seed-skus", UPGRADE)
             inspect("verify-skus", UPGRADE)
             inspect("seed-warehouses", UPGRADE)
-            v104 = inspect("snapshot", UPGRADE)
-            preserved = ("rows", "schema", "patches", "catalog", "sku", "warehouse")
-            require(sum(len(table["rows"]) for table in v104["catalog"].values()) == 9
-                    and len(v104["sku"]["native_items"]) == 2
-                    and len(v104["warehouse"]["native_leaves"]) == 9, "unexpected synthetic V1-04 records")
-            record("merged V1-04 with specifications, audit, SKU and W1–W4 mappings", v104)
+            inspect("seed-access", UPGRADE)
+            baseline_state = inspect("snapshot", UPGRADE)
+            preserved = ("rows", "schema", "patches", "catalog", "sku", "warehouse", "access")
+            require(sum(len(table["rows"]) for table in baseline_state["catalog"].values()) == 9
+                    and len(baseline_state["sku"]["native_items"]) == 2
+                    and len(baseline_state["warehouse"]["native_leaves"]) == 9
+                    and len(baseline_state["access"]["assignments"]) == 2,
+                    "unexpected merged V1-05 synthetic state")
+            record("merged V1-05 with catalog, native mappings and employee grants", baseline_state)
 
-            def check_v105_failure(state):
-                require(all(state[key] == v104[key] for key in preserved)
-                        and state["access"] and all(state["access"]["tables"].values())
-                        and not state["access"]["assignments"], "unexpected V1-05 migration failure state")
+            def check_v106_failure(state):
+                require(all(state[key] == baseline_state[key] for key in preserved)
+                        and state["batch"] and not state["batch"]["rows"] and not state["batch"]["native"],
+                        "unexpected V1-06 migration failure state")
 
-            rehearse_failure(baseline, v104, check_v105_failure)
+            rehearse_failure(baseline, baseline_state, check_v106_failure)
         finally:
             deploy_app()
 
     check_bench()
     site_command("migrate", target=UPGRADE)
     upgraded = inspect("snapshot", UPGRADE)
-    verify_access_schema(upgraded)
-    require(all(upgraded[key] == v104[key] for key in preserved),
-            "V1-05 migration changed previous domain identities or native mappings")
-    record("V1-05 upgraded from merged V1-04 with existing data preserved", upgraded)
+    verify_batch_schema(upgraded)
+    require(all(upgraded[key] == baseline_state[key] for key in preserved),
+            "V1-06 migration changed V1-05 identities, native mappings, or grants")
+    record("V1-06 upgraded from merged V1-05 with existing data preserved", upgraded)
     inspect("verify-skus", UPGRADE)
+    inspect("verify-access", UPGRADE)
     test_site(UPGRADE)
     inspect("sku-concurrency", UPGRADE)
+    inspect("batch-verify", UPGRADE)
     inspect("catalog-permissions", UPGRADE)
     inspect("warehouse-concurrency", UPGRADE)
     inspect("warehouse-http", UPGRADE)
@@ -227,11 +243,20 @@ def rehearse_upgrade(clean):
     populated = inspect("snapshot", UPGRADE)
     require(len(populated["sku"]["native_items"]) == 4
             and len(populated["warehouse"]["native_leaves"]) == 14
-            and len(populated["access"]["tables"]["HP V1 Warehouse Access"]["rows"]) == 8,
+            and len(populated["access"]["tables"]["HP V1 Warehouse Access"]["rows"]) == 9
+            and len(populated["batch"]["rows"]) == len(populated["batch"]["native"]) == 7,
             "unexpected persistent mapping or grant counts")
     record("upgraded site with synthetic domain data and warehouse grants", populated)
     repeat_migration(UPGRADE, populated)
     repeat_migration(UPGRADE, populated)
+
+    def check_populated_failure(state):
+        require(state == populated, "failing migration changed the populated Batch snapshot")
+
+    rehearse_failure(None, populated, check_populated_failure)
+    repeat_migration(UPGRADE, populated)
+    test_site(UPGRADE)
     inspect("verify-skus", UPGRADE)
+    inspect("verify-access", UPGRADE)
     check_installed(UPGRADE)
     require(inspect("snapshot", SITE) == clean, "upgrade rehearsal changed the clean-install site")

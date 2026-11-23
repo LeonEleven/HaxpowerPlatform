@@ -2,31 +2,22 @@
 
 import frappe
 
-from ..adapters.erpnext import item, warehouse
+from ..adapters.erpnext import batch, item, warehouse
 from ..catalog.sku_persistence import SKU
 from ..warehouse.persistence import LOCATION
 from .policy import deny
 from .registry import STOCK_DOCUMENTS
 
-# V1-06 can extend this predicate with its persisted forward/reverse mapping.
-BATCH_PREFIXES = ("HP-NB-", "HP-RB-")
 MASTER_MAPPINGS = {
     "Item": (item.managed_item, item.SKU_MARKER, SKU, "native_item"),
     "Warehouse": (warehouse.managed_warehouse, warehouse.MARKER, LOCATION, "native_warehouse"),
 }
 
 
-def managed_batch(name, *, locked=False):
-    return bool(isinstance(name, str) and name and (
-        name.upper().startswith(BATCH_PREFIXES)
-        or item.managed_item(frappe.db.get_value("Batch", name, "item", for_update=locked), locked=locked)
-    ))
-
-
 def _references(doc, *, locked):
     # ERPNext uses typed Links in both headers and detail rows. Inspect the
     # before-image too so clearing a managed reference cannot bypass a guard.
-    predicates = {"Item": item.managed_item, "Warehouse": warehouse.managed_warehouse, "Batch": managed_batch}
+    predicates = {"Item": item.managed_item, "Warehouse": warehouse.managed_warehouse, "Batch": batch.managed_batch}
     for row in (doc, *doc.get_all_children()):
         for field in row.meta.get_link_fields():
             if (predicate := predicates.get(field.options)) and predicate(row.get(field.fieldname), locked=locked):
@@ -36,10 +27,11 @@ def _references(doc, *, locked):
 
 def guard_stock_document(doc, method=None, *, target=None, merge=False):
     previous = doc.get_doc_before_save()
-    if doc.doctype == "Batch" and any(
-        managed_batch(name, locked=True) for name in (doc.name, doc.get("batch_id"), target)
-    ):
-        deny()
+    if doc.doctype == "Batch":
+        if batch.allows_batch_insert(doc, method):
+            return
+        if any(batch.managed_batch(name, locked=True) for name in (doc.name, doc.get("batch_id"), target)):
+            deny()
     if _references(doc, locked=True) or (previous and _references(previous, locked=True)):
         deny()
     if merge and target and frappe.db.exists(doc.doctype, target):

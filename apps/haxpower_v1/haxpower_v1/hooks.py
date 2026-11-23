@@ -39,6 +39,7 @@ doc_events = {
 _warehouse_adapter = "haxpower_v1.adapters.erpnext.warehouse"
 after_install.extend([
     "haxpower_v1.warehouse.persistence.ensure_schema",
+    "haxpower_v1.inventory.batch.persistence.ensure_schema",
     f"{_warehouse_adapter}.ensure_schema",
 ])
 
@@ -90,6 +91,7 @@ for _doctype in _STOCK_DOCUMENTS:
     extend_doctype_class[_doctype] = [f"{_access}.StockLifecycle"]
 doc_events["Stock Entry"]["before_insert"] = [f"{_warehouse_adapter}.guard_stock_entry", _stock_guard]
 doc_events["Stock Ledger Entry"]["before_insert"] = [f"{_warehouse_adapter}.guard_transit_posting", _stock_guard]
+doc_events["Batch"]["before_save"] = _stock_guard
 
 for _doctype in _MAINTENANCE_DOCUMENTS:
     doc_events[_doctype] = dict.fromkeys((

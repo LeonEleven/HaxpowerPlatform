@@ -1,0 +1,74 @@
+{
+ "doctype": "DocType",
+ "name": "HP V1 Batch Mapping",
+ "module": "HP V1",
+ "engine": "InnoDB",
+ "field_order": [
+  "sku",
+  "kind",
+  "original_text",
+  "normalized_key",
+  "policy_version",
+  "native_batch",
+  "status"
+ ],
+ "fields": [
+  {
+   "fieldname": "sku",
+   "label": "SKU",
+   "fieldtype": "Link",
+   "options": "HP V1 Stock Item",
+   "reqd": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "kind",
+   "label": "Kind",
+   "fieldtype": "Select",
+   "options": "BATCH\nNO_BATCH",
+   "reqd": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "original_text",
+   "label": "Original Batch Text",
+   "fieldtype": "Small Text",
+   "read_only": 1
+  },
+  {
+   "fieldname": "normalized_key",
+   "label": "Normalized Key",
+   "fieldtype": "Data",
+   "length": 480,
+   "reqd": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "policy_version",
+   "label": "Policy Version",
+   "fieldtype": "Data",
+   "length": 40,
+   "reqd": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "native_batch",
+   "label": "ERPNext Batch",
+   "fieldtype": "Link",
+   "options": "Batch",
+   "reqd": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "status",
+   "label": "Status",
+   "fieldtype": "Select",
+   "options": "Active\nInactive",
+   "reqd": 1,
+   "read_only": 1
+  }
+ ],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "permissions": []
+}

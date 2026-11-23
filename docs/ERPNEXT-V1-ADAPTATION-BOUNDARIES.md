@@ -37,7 +37,7 @@ Stock User、Stock Manager 或 Item Manager 角色的用户仍经过同一规则
 | --- | --- |
 | REST v1/v2、`frappe.client`、Desk 表单及列表 | 受管 Item 和叶仓拒绝直接详情及写入，列表和计数排除受管记录。允许 Frappe 标准权限下未受管 Item、Warehouse、UOM、Item Group 和 Warehouse Type 的已审查操作。含受管引用的主数据详情拒绝。公司原生库存默认值、复杂查询、DocType 自定义方法、合并及动态链接查询保持关闭。 |
 | Stock Entry、Stock Reconciliation、Purchase Receipt、Purchase Invoice、Delivery Note、Sales Invoice 等 | 原生库存及上下游单据的 HTTP 读写均关闭。已登记 ORM 守卫扫描单据及明细的 Item、Warehouse 和 Batch 链接，包括更新前的引用，并在提交、取消与生命周期操作时阻止受管引用。 |
-| SLE、Bin、Batch、Serial No 和 Serial and Batch Bundle | HTTP 关闭。ORM 守卫识别受管 Item、库位、Batch 保留前缀及关联受管 Item 的批次。V1-06 将接入正式批次映射及受控执行。 |
+| SLE、Bin、Batch、Serial No 和 Serial and Batch Bundle | HTTP 关闭。ORM 守卫识别受管 Item、库位、保留前缀、Batch 的 Item 归属和持久映射。V1-06 仅在绑定当前身份、SKU、映射和原生记录的内部范围内允许 Batch 创建。 |
 | 取消、删除、改名、导入和批量动作 | 受管资源的 HTTP 生命周期操作及全部原生库存导入、批量操作关闭。Item、Warehouse 映射生命周期另有 ORM 守卫。 |
 | Stock Balance、Stock Ledger、Prepared Report、打印、File、私有文件下载及导出 | HTTP 关闭。V1-15 接入按仓授权的报表与导出，V1-16 接入受控导入。公共静态文件目录仅承载公开页面资产，受限材料须按业务文件流程入库。 |
 | 账簿重估、公司交易清理、排队任务 | 原生重估与交易清理 HTTP 入口关闭。迁移停止已登记的原生重估、账簿改名、批量重试、补货和序列号维护计划。Worker 拒绝已登记的计划任务及队列调用，维护 DocType 在存在受管映射时拒绝 ORM 操作。生产队列和站点运维权限由 B11 逐项复核。 |
@@ -48,7 +48,7 @@ Stock User、Stock Manager 或 Item Manager 角色的用户仍经过同一规则
 
 ## 批次输入规范
 
-这是供 V1 评审的规范。Stage 2B 实验按下表执行。批次大小写、上下游表格清洗策略及正式长度上限仍待确认。
+V1-06 的 `b03-candidate-1` 源于 Stage 2B。它只在明确标记的合成样本上开放写入。正式字符等价、长度、历史例外和归并签核均待 B03 审定。
 
 | 输入 | 服务端处置 |
 | --- | --- |
@@ -57,9 +57,12 @@ Stock User、Stock Manager 或 Item Manager 角色的用户仍经过同一规则
 | 缺选择或缺 `mode` | 未选择，拒绝提交。读取和正式变动的请求不能用缺字段代表无批次。入库允许无批次，调用方显式选择。 |
 | `BATCH` 内为空字符串、全空白或 JSON null | 拒绝作为真实批次。确认无批次时改传 `NO_BATCH`。 |
 | 单个或多个空引号及引号之间纯空白 | 返回需确认的错误，覆盖常见 ASCII、弯引号、全角和角引号。人工确认无批次后改传 `NO_BATCH`，确有意义的历史编码进入例外复核。保存 `"STD61"` 等有内容引号的文本，拒绝自动剥除引号。 |
-| 命名空间或控制字符异常 | 任何大小写的 `HP-NB-` / `HP-RB-` 都属于适配层，不能通过业务输入绕入原生表。不可打印字符、潜在标记文本或超过实验长度 80 的输入明确拒绝，禁止截断或替换。 |
+| 命名空间或控制字符异常 | 保留前缀区分为 `HP-NB-` 和 `HP-RB-`，同时保留其大小写和兼容字符变体。拒绝控制字符、不可打印字符和尖括号，允许 Unicode 空格分隔符。候选长度上限为 80 个 Unicode 码点，原始输入上限为 256 个码点。 |
+| 确认或碰撞 | 只裁剪首尾空格分隔符，原文和候选值一起返回。有变化时须确认对应策略版本和本次预览。同一 SKU 的既有键若对应不同原文，拒绝复用或改写，留待 B03 复核。 |
 
-适配层用 SKU 的稳定标识及批次种类计算或维护映射，复用前核验归属、真实文本、启用状态及唯一性。用户选择无批次需唯一匹配系统桶；实批次须对应实体映射。API、报表、导出、日志与错误响应仅返回域批次或 `null`。若真实批次名称可能重复或被更改，应以不可变批次标识管理，从验收覆盖映射迁移及回滚。
+适配层为每个稳定映射 ID 创建一个原生 Batch，填入固定原生 Item，查回复用时复核正反向归属、映射状态和原生禁用标志。受管 Batch 的 ORM 改绑、禁用、删除、改名和合并均拒绝。站点管理员可在 Bench 检查孤立 Batch、命名空间冲突及状态异常。员工 API、报表、导出、业务日志和普通错误仅返回领域信息。
+
+首次建映射前检查 ERPNext 的 `enable_serial_and_batch_no_for_item` 和受管 Item。已有原生库存、SLE 历史、已知在用单据或序列批次引用的 Item 保持关闭。安全的 Item 以原生保存操作启用 `has_batch_no`，保持 `create_new_batch=0`，后续复用保持幂等。升级只增加结构。原生记账、Bundle 绑定和库存权限由库存内核与后续收发任务验收。
 
 旧数据导入应先生成**异常批次清洗报告**。每行至少包含文件 / 工作表 / 行号、SKU、库位、原始批次及字符展示、原数量、候选值或拟用 `NO_BATCH`、异常类型、冲突组、审核人、处理决定及时间。区分真实源 NULL、空字符串、全空白、疑似空引号、去边后变化、保留前缀冲突、不可打印与超长。同一 SKU 的多种输入归并到同一候选值时标记冲突，先核对实物和余额再决定。一次审核通过的清单再进入幂等导入并逐桶对账。实验仅用虚构输入生成异常预览，完整 E11 文件导入未执行。
 [批次模型](INVENTORY-MODEL.md) · [实验规范实现](../dev/erpnext-lab/haxpower_platform/haxpower_platform/batch_input.py)
