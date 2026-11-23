@@ -56,7 +56,12 @@ def snapshot():
         from warehouse_probe import snapshot as warehouse_snapshot
 
         warehouse = warehouse_snapshot()
-    return {"schema": schema, "rows": rows, "patches": logs, "catalog": catalog, "sku": sku,
+    access = {}
+    if frappe.db.table_exists("HP V1 Warehouse Access"):
+        from access_probe import snapshot as access_snapshot
+
+        access = access_snapshot()
+    return {"access": access, "schema": schema, "rows": rows, "patches": logs, "catalog": catalog, "sku": sku,
             "warehouse": warehouse}
 
 
@@ -103,6 +108,10 @@ def main(action, site):
             from warehouse_probe import verify_concurrency, verify_http
 
             (verify_concurrency if action == "warehouse-concurrency" else verify_http)(site)
+        elif action == "access-http":
+            from access_probe import verify_http
+
+            verify_http(site)
         else:
             raise ValueError("unknown probe action")
     finally:

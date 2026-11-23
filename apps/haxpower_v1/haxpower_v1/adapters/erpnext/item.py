@@ -1,15 +1,15 @@
 """ERPNext v16 Item/UOM mapping for the trusted SKU service."""
 
-from contextlib import contextmanager
-from contextvars import ContextVar
 from decimal import Decimal
 
 import frappe
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 from frappe.utils import cint, getdate
 
+from ...access.execution import allows_native_write, native_write
 from ...catalog import validation as check
 from ...catalog.dto import ACTIVE
+from ...catalog.persistence import require_maintainer
 from ...catalog.sku_dto import ItemMappingDiagnostic, MappingStatus
 from ...catalog.sku_persistence import SKU
 
@@ -46,7 +46,7 @@ REFERENCE_FIELDS = {
     "Work Order": "production_item",
     "Work Order Item": "item_code",
 }
-_item_write = ContextVar("hp_v1_item_write", default=None)
+ITEM_SERVICE = "SKU mapping"
 
 
 def ensure_schema():
@@ -99,22 +99,10 @@ def validate_configuration(uom_name: str, precision: int) -> str:
     return group.name
 
 
-@contextmanager
-def _write_item(name, sku_id):
-    token = _item_write.set((name, sku_id))
-    search_setting = frappe.conf.get("disable_global_search")
-    had_search_setting = "disable_global_search" in frappe.conf
-    # Native global search queues to Redis before the database commits.
-    # Managed SKU search reads the catalog's transactional data.
-    frappe.conf["disable_global_search"] = True
-    try:
-        yield
-    finally:
-        if had_search_setting:
-            frappe.conf["disable_global_search"] = search_setting
-        else:
-            frappe.conf.pop("disable_global_search", None)
-        _item_write.reset(token)
+def _write_item(name, sku_id, *, existing):
+    return native_write(
+        require_maintainer, service=ITEM_SERVICE, native_name=name, domain_id=sku_id, existing=existing,
+    )
 
 
 def _conversion_factors(item):
@@ -150,7 +138,7 @@ def bind_item(sku, *, adopt: bool):
     if not adopt:
         if frappe.db.get_value(ITEM, name, for_update=True):
             frappe.throw("An ERPNext Item already uses this code. Explicit association is required.")
-        with _write_item(name, sku.name):
+        with _write_item(name, sku.name, existing=False):
             item = frappe.get_doc(
                 doctype=ITEM, item_code=name, item_name=sku.display_name, item_group=sku.native_item_group,
                 stock_uom=sku.stock_uom, disabled=0, standard_rate=0, opening_stock=0,
@@ -166,7 +154,7 @@ def bind_item(sku, *, adopt: bool):
             frappe.throw("The ERPNext Item does not match the requested SKU identity or unit.")
         _check_references(item.name)
         item.set(SKU_MARKER, sku.name)
-        with _write_item(name, sku.name):
+        with _write_item(name, sku.name, existing=True):
             item.flags.notify_update = False
             item.save(ignore_permissions=True)
 
@@ -215,7 +203,7 @@ def mapping_for_item(name: str) -> ItemMappingDiagnostic:
 def update_item_name(sku, display_name):
     item = frappe.get_doc(ITEM, sku.native_item, for_update=True)
     item.item_name = display_name
-    with _write_item(item.name, sku.name):
+    with _write_item(item.name, sku.name, existing=True):
         item.flags.notify_update = False
         item.save(ignore_permissions=True)
 
@@ -223,6 +211,8 @@ def update_item_name(sku, display_name):
 def _check_references(name):
     if frappe.db.get_value("Bin", {"item_code": name, "actual_qty": ("!=", 0)}, for_update=True):
         frappe.throw("The ERPNext Item has native stock.")
+    if frappe.db.get_value("DocShare", {"share_doctype": ITEM, "share_name": name}, for_update=True):
+        frappe.throw("The ERPNext Item has a native sharing grant.")
     if frappe.db.get_value("Stock Ledger Entry", {"item_code": name}, for_update=True):
         frappe.throw("The ERPNext Item has native stock ledger history.")
     for doctype, item_field in REFERENCE_FIELDS.items():
@@ -237,13 +227,13 @@ def assert_deactivation_safe(sku):
     frappe.throw("SKU deactivation requires V1 inventory reference and write coordination.")
 
 
-def _mapped_item(name):
-    if not name or not frappe.db.table_exists(SKU):
+def managed_item(name, *, locked=False):
+    if not name:
         return False
     return bool(
         (frappe.db.has_column(ITEM, SKU_MARKER)
-         and frappe.db.get_value(ITEM, name, SKU_MARKER, for_update=True))
-        or frappe.db.get_value(SKU, {"native_item": name}, for_update=True)
+         and frappe.db.get_value(ITEM, name, SKU_MARKER, for_update=locked))
+        or (frappe.db.table_exists(SKU) and frappe.db.get_value(SKU, {"native_item": name}, for_update=locked))
     )
 
 
@@ -259,25 +249,28 @@ def _protected_item_fields(doc):
 def guard_item_change(doc, method=None):
     marker = doc.get(SKU_MARKER) or None
     name = doc.name or doc.item_code
-    if marker and _item_write.get() == (name, marker):
+    existing = not doc.is_new()
+    if marker and allows_native_write(ITEM_SERVICE, name, marker, existing=existing):
         return
-    previous = doc.get_doc_before_save()
-    if previous is None:
-        if marker:
-            frappe.throw("Use the SKU service to assign the native Item mapping.", frappe.PermissionError)
-        return
-    if (marker or _mapped_item(name)) and _protected_item_fields(doc) != _protected_item_fields(previous):
-        frappe.throw("Use the SKU service to change managed Item identity or inventory settings.", frappe.PermissionError)
+    if marker or (existing and managed_item(name, locked=True)):
+        previous = doc.get_doc_before_save()
+        # Preserve the existing Bench operator's non-identity maintenance.
+        if (frappe.session.user == "Administrator" and not getattr(frappe.local, "request", None)
+                and previous and _protected_item_fields(doc) == _protected_item_fields(previous)):
+            return
+        frappe.throw("Use the SKU service to change a managed Item.", frappe.PermissionError)
 
 
-def guard_item_trash(doc, method=None):
-    if _mapped_item(doc.name):
-        frappe.throw("A managed ERPNext Item cannot be deleted.", frappe.PermissionError)
+class ItemLifecycle:
+    def on_trash(self):
+        if managed_item(self.name, locked=True):
+            frappe.throw("A managed ERPNext Item cannot be deleted.", frappe.PermissionError)
+        super().on_trash()
 
-
-def guard_item_rename(doc, method, old, new, merge=False):
-    if any(_mapped_item(name) for name in sorted({old, new})):
-        frappe.throw("A managed ERPNext Item cannot be renamed or merged.", frappe.PermissionError)
+    def before_rename(self, old, new, merge=False):
+        if any(managed_item(name, locked=True) for name in sorted({old, new})):
+            frappe.throw("A managed ERPNext Item cannot be renamed or merged.", frappe.PermissionError)
+        super().before_rename(old, new, merge=merge)
 
 
 def _used_master(doctype, name):

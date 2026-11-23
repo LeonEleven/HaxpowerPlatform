@@ -231,13 +231,16 @@ class TestWarehouse(IntegrationTestCase):
         unit = make_uom(tag)
         item = frappe.get_doc(doctype="Item", item_code=tag, item_name=tag, item_group=make_item_group(tag),
                               stock_uom=unit, is_stock_item=1).insert()
+        unmanaged = make_native(self.company, self.parent)
         draft = frappe.get_doc(
             doctype="Stock Entry", company=self.company, stock_entry_type="Material Receipt",
-            purpose="Material Receipt", items=[{"item_code": item.name, "qty": 1, "t_warehouse": name,
+            purpose="Material Receipt", items=[{"item_code": item.name, "qty": 1, "t_warehouse": unmanaged.name,
                                                 "uom": unit, "stock_uom": unit, "conversion_factor": 1,
                                                 "basic_rate": 1}],
         ).insert()
         self.assertEqual(draft.docstatus, 0)
+        # Model a draft that predates the V1-05 lifecycle guard.
+        frappe.db.set_value("Stock Entry Detail", draft.items[0].name, "t_warehouse", name)
         with self.assertRaisesRegex(frappe.ValidationError, "native reference in Stock Entry Detail"):
             service.deactivate_location(location.id)
         self.assertEqual(service.resolve_location(location.id), location)

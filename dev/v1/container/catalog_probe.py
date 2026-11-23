@@ -64,7 +64,6 @@ def verify_native_denials(site):
     )
     user.insert(ignore_permissions=True)
     frappe.db.commit()
-    from haxpower_v1.adapters.erpnext.item import SKU_MARKER
     from sku_probe import PREFIX, snapshot as sku_snapshot
 
     sku_name = f"{PREFIX}-A"
@@ -110,11 +109,9 @@ def verify_native_denials(site):
             ("DELETE", f"/api/v2/document/Item/{sku_name}", None),
             ("POST", "/api/method/frappe.client.set_value",
              {"doctype": "Item", "name": sku_name, "fieldname": "disabled", "value": 1}),
+            ("GET", f"/api/resource/Item/{sku_name}", None),
+            ("GET", f"/api/v2/document/Item/{sku_name}", None),
         )
-        for endpoint in (f"/api/resource/Item/{sku_name}", f"/api/v2/document/Item/{sku_name}"):
-            response = request("GET", endpoint)
-            require(response.status_code == 200 and not response.json["data"].get(SKU_MARKER),
-                    "native Item read exposed the internal mapping marker")
 
         for method, path, data in denied:
             response = request(method, path, data)
@@ -127,4 +124,4 @@ def verify_native_denials(site):
     frappe.db.rollback()
     require(before == (snapshot(), sku_snapshot()), "denied HTTP requests changed catalog or Item data")
     print(f"Authenticated non-maintenance user: {checked} HTTP requests denied, "
-          "two native reads hid the mapping marker, catalog and Item data unchanged.")
+          "including managed Item detail in both REST versions. Catalog and Item data unchanged.")
