@@ -126,6 +126,7 @@ ERPNext 设置向导安装标准 Warehouse Type `Transit`。未运行向导的�
 在独立一次性项目中执行 `preflight → up → prepare → integration → start → smoke → ci-clean`，
 命令均为 `python3 dev/v1/v1.py <操作>`。集成入口使用锁定的 Frappe/ERPNext v16.55.0、
 MariaDB 11.8.9 和 Redis 7.4.12。GitHub Actions 使用同一入口并保存脱敏日志。
+以下记录 PR #18 的验证范围。当前集成继承权限矩阵和并发探针，升级基线推进到 V1-05。
 
 - 空站检查技术角色、权限表及零授权。合成升级固定在 V1-04 已合并提交
   `cc5dbd3ed3e62d6990dd06ab3ef021cfa3d2d582`，在加入权限表前保存合成规格审计、SKU、Item、

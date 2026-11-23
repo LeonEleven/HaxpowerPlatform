@@ -125,7 +125,7 @@ worker 和 scheduler 烟测通过。B02、B04、B11 仍待确认。项目负责�
 V1-07 在共用库存事务中接入批次、操作权限和仓库范围。
 正式收发的 Batch/Bundle 记账及逐桶数量验收由 V1-08/V1-09 继续完成。
 
-[开发分支](https://github.com/LeonEleven/HaxpowerPlatform/tree/feat/v1-06-batch-mapping) · [V1-06 开发验证](../dev/v1/README.md#v1-06-批次验证) · [批次服务](TECHNICAL-DESIGN.md#v1-06-批次映射和事务)
+[V1-06 Draft PR #19](https://github.com/LeonEleven/HaxpowerPlatform/pull/19) · [PR #19 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/19/checks) · [V1-06 开发验证](../dev/v1/README.md#v1-06-批次验证) · [批次服务](TECHNICAL-DESIGN.md#v1-06-批次映射和事务)
 
 每次完成重要开发阶段时更新此节，记录日期、对应 PR 或提交、实际完成范围、验收证据、未决项及下一任务。PR 状态是带日期的核对结果，下一会话重新查询。
 
