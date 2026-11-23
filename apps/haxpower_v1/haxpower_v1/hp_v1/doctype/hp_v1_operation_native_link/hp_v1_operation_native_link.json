@@ -1,0 +1,76 @@
+{
+ "doctype": "DocType",
+ "name": "HP V1 Operation Native Link",
+ "module": "HP V1",
+ "engine": "InnoDB",
+ "field_order": [
+  "operation_id",
+  "line_id",
+  "role",
+  "parent_type",
+  "parent_id",
+  "detail_type",
+  "detail_id"
+ ],
+ "fields": [
+  {
+   "fieldname": "operation_id",
+   "label": "Operation Id",
+   "fieldtype": "Link",
+   "read_only": 1,
+   "options": "HP V1 Operation Log",
+   "reqd": 1
+  },
+  {
+   "fieldname": "line_id",
+   "label": "Line Id",
+   "fieldtype": "Link",
+   "read_only": 1,
+   "options": "HP V1 Stock Document Line",
+   "reqd": 1
+  },
+  {
+   "fieldname": "role",
+   "label": "Role",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 40,
+   "reqd": 1
+  },
+  {
+   "fieldname": "parent_type",
+   "label": "Parent Type",
+   "fieldtype": "Link",
+   "read_only": 1,
+   "options": "DocType",
+   "reqd": 1
+  },
+  {
+   "fieldname": "parent_id",
+   "label": "Parent Id",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140,
+   "reqd": 1
+  },
+  {
+   "fieldname": "detail_type",
+   "label": "Detail Type",
+   "fieldtype": "Link",
+   "read_only": 1,
+   "options": "DocType",
+   "reqd": 1
+  },
+  {
+   "fieldname": "detail_id",
+   "label": "Detail Id",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140,
+   "reqd": 1
+  }
+ ],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "permissions": []
+}

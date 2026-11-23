@@ -1,0 +1,73 @@
+{
+ "doctype": "DocType",
+ "name": "HP V1 Stock Document",
+ "module": "HP V1",
+ "engine": "InnoDB",
+ "field_order": [
+  "company",
+  "document_type",
+  "document_number",
+  "status",
+  "revision",
+  "notes",
+  "effective_operation"
+ ],
+ "fields": [
+  {
+   "fieldname": "company",
+   "label": "Company",
+   "fieldtype": "Link",
+   "read_only": 1,
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "fieldname": "document_type",
+   "label": "Document Type",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 40,
+   "reqd": 1
+  },
+  {
+   "fieldname": "document_number",
+   "label": "Document Number",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 100,
+   "reqd": 1
+  },
+  {
+   "fieldname": "status",
+   "label": "Status",
+   "fieldtype": "Select",
+   "read_only": 1,
+   "options": "Draft\nEffective",
+   "reqd": 1
+  },
+  {
+   "fieldname": "revision",
+   "label": "Revision",
+   "fieldtype": "Int",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "notes",
+   "label": "Notes",
+   "fieldtype": "Small Text",
+   "read_only": 1
+  },
+  {
+   "fieldname": "effective_operation",
+   "label": "Effective Operation",
+   "fieldtype": "Link",
+   "read_only": 1,
+   "options": "HP V1 Operation Log",
+   "reqd": 0
+  }
+ ],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "permissions": []
+}

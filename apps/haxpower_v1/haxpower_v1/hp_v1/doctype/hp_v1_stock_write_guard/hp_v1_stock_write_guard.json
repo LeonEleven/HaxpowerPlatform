@@ -1,0 +1,11 @@
+{
+ "doctype": "DocType",
+ "name": "HP V1 Stock Write Guard",
+ "module": "HP V1",
+ "engine": "InnoDB",
+ "field_order": [],
+ "fields": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "permissions": []
+}

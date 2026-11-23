@@ -65,4 +65,12 @@ V1-06 的 `b03-candidate-1` 源于 Stage 2B。它只在明确标记的合成样�
 首次建映射前检查 ERPNext 的 `enable_serial_and_batch_no_for_item` 和受管 Item。已有原生库存、SLE 历史、已知在用单据或序列批次引用的 Item 保持关闭。安全的 Item 以原生保存操作启用 `has_batch_no`，保持 `create_new_batch=0`，后续复用保持幂等。升级只增加结构。原生记账、Bundle 绑定和库存权限由库存内核与后续收发任务验收。
 
 旧数据导入应先生成**异常批次清洗报告**。每行至少包含文件 / 工作表 / 行号、SKU、库位、原始批次及字符展示、原数量、候选值或拟用 `NO_BATCH`、异常类型、冲突组、审核人、处理决定及时间。区分真实源 NULL、空字符串、全空白、疑似空引号、去边后变化、保留前缀冲突、不可打印与超长。同一 SKU 的多种输入归并到同一候选值时标记冲突，先核对实物和余额再决定。一次审核通过的清单再进入幂等导入并逐桶对账。实验仅用虚构输入生成异常预览，完整 E11 文件导入未执行。
+
+## V1-07 执行边界
+
+执行内核接收领域 ID。原生适配器在受控执行身份中解析 Item、Warehouse 和 Batch，提供原生父单及明细稳定 ID。V1-07 的唯一执行适配器使用合成父子 DocType。Stock Entry、SLE、Bin 和 Bundle 的员工写入口仍受 V1-05 守卫保护。
+
+正式适配前按锁定源码复核 ERPNext 的即时和后台路径。v16.55.0 的 `stock_ledger.py` 中重估进度保存会显式提交并发布实时消息，`repost_item_valuation.py` 的 `repost` 及失败尾部也会提交，后台入口会入队。现有原生重估守卫继续生效。适配层数据库边界拒绝嵌套提交、开启或结束事务、DDL、自动提交和事务回调。V1-08/V1-09 须额外验证原生 ORM、缓存、通知和后台副作用、失败回滚及当前读，再注册正式适配器。[重估进度源码](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/stock_ledger.py#L508-L529) · [重估任务源码](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/doctype/repost_item_valuation/repost_item_valuation.py#L630-L725)
+
+[事务和后续接入](TECHNICAL-DESIGN.md#v1-07-库存执行内核)
 [批次模型](INVENTORY-MODEL.md) · [实验规范实现](../dev/erpnext-lab/haxpower_platform/haxpower_platform/batch_input.py)

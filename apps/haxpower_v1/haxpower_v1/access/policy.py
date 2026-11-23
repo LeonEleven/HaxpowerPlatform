@@ -42,43 +42,48 @@ def deny():
     frappe.throw("Haxpower access is denied.", frappe.PermissionError)
 
 
-def active_actor():
+def active_actor(*, locked=False):
     user = frappe.session.user
-    if not user or user == "Guest" or not frappe.db.get_value("User", user, "enabled"):
+    if not user or user == "Guest" or not frappe.db.get_value("User", user, "enabled", for_update=locked):
         deny()
     return user
 
 
-def granted_operations():
-    actor = active_actor()
+def granted_operations(*, locked=False):
+    actor = active_actor(locked=locked)
     assignments = frappe.qb.DocType("Has Role")
     roles = frappe.qb.DocType("Role")
-    enabled_roles = set(
+    query = (
         frappe.qb.from_(assignments).join(roles).on(assignments.role == roles.name)
         .select(roles.name).where(
             (assignments.parenttype == "User") & (assignments.parentfield == "roles")
             & (assignments.parent == actor) & (roles.disabled == 0)
-        ).run(pluck=True)
+        )
     )
+    enabled_roles = set((query.for_update() if locked else query).run(pluck=True))
     return frozenset(operation for operation in Operation if operation.role in enabled_roles)
 
 
-def require_operation(operation: Operation):
-    if operation not in granted_operations():
+def require_operation(operation: Operation, *, locked=False):
+    if operation not in granted_operations(locked=locked):
         deny()
 
 
-def _selected_warehouses(scope):
-    return frappe.get_all(SCOPE_ROW, filters={
+def _selected_warehouses(scope, *, locked=False):
+    return frappe.db.get_values(SCOPE_ROW, {
         "parent": scope, "parenttype": SCOPE, "parentfield": "warehouses",
-    }, pluck="warehouse")
+    }, "warehouse", pluck=True, for_update=locked)
+
+
+def _scope(*, company=None, locked=False):
+    scope = frappe.db.get_value(SCOPE, {"user": active_actor(locked=locked)}, ("name", "company", "mode"),
+                                as_dict=True, for_update=locked)
+    if scope and scope.mode in (Mode.ALL, Mode.SELECTED) and (company is None or scope.company == company):
+        return scope
 
 
 def _authorized_warehouses(*, company=None):
-    scope = frappe.db.get_value(SCOPE, {"user": active_actor()}, ("name", "company", "mode"), as_dict=True)
-    if not scope or scope.mode not in (Mode.ALL, Mode.SELECTED):
-        return {}
-    if company is not None and scope.company != company:
+    if not (scope := _scope(company=company)):
         return {}
     filters = {"company": scope.company, "kind": PHYSICAL, "status": ACTIVE}
     if scope.mode == Mode.SELECTED:
@@ -131,6 +136,32 @@ def location_mapping_is_visible(location, warehouse):
 def require_location_access(location_id, operation: Operation):
     require_operation(operation)
     return _authorized_location(location_id, _authorized_warehouses())
+
+
+def lock_execution_locations(company, location_ids):
+    """Recheck scope and both physical mappings by current read under the stock guard."""
+    if not (scope := _scope(company=company, locked=True)):
+        deny()
+    selected = set(_selected_warehouses(scope.name, locked=True)) if scope.mode == Mode.SELECTED else None
+    locations = {}
+    for location_id in sorted({_record_id(value) for value in location_ids}):
+        row = frappe.db.get_value(LOCATION, location_id, ("name", "warehouse", "native_warehouse", "status"),
+                                  as_dict=True, for_update=True)
+        if not row or row.name != location_id or row.status != ACTIVE:
+            deny()
+        locations[location_id] = row
+    warehouses = {}
+    for warehouse_id in sorted({row.warehouse for row in locations.values()}):
+        row = frappe.db.get_value(WAREHOUSE, warehouse_id, ("name", "company", "kind", "native_parent", "status"),
+                                  as_dict=True, for_update=True)
+        if (not row or row.company != company or row.kind != PHYSICAL or row.status != ACTIVE
+                or (selected is not None and warehouse_id not in selected)):
+            deny()
+        warehouses[warehouse_id] = row
+    for location in locations.values():
+        if native.mapping_status(location, warehouses[location.warehouse], locked=True) != "Verified":
+            deny()
+    return locations
 
 
 def require_transfer_access(source_warehouse_id, target_warehouse_id):

@@ -148,11 +148,15 @@ def verify_http(site):
     sku = frappe.db.get_value("HP V1 Stock Item", {"native_item": managed_item}, ("name", "specification"), as_dict=True)
     require(sku, "missing baseline SKU")
     from haxpower_v1.inventory.batch.persistence import MAPPING
+    from haxpower_v1.inventory.operations.persistence import DOCUMENT, LOG, REQUEST
+    from stock_probe import snapshot as stock_snapshot
 
     batch_mapping = frappe.db.get_value(
         MAPPING, {"kind": "NO_BATCH", "sku": sku.name}, ("name", "native_batch"), as_dict=True,
     )
     require(batch_mapping, "missing synthetic batch for HTTP boundary verification")
+    stock_document = frappe.db.get_value(DOCUMENT, {"status": "Effective"})
+    require(stock_document, "missing committed synthetic stock document for HTTP verification")
     all_user = synthetic_user(run_id, "all", Operation.WAREHOUSE_READ, Operation.INVENTORY_READ)
     selected = synthetic_user(run_id, "selected", Operation.WAREHOUSE_READ, Operation.TRANSFER, Operation.PRODUCT_READ)
     operator = synthetic_user(run_id, "operator", Operation.WAREHOUSE_MAINTAIN, Operation.RECEIVE, Operation.ISSUE)
@@ -214,7 +218,7 @@ def verify_http(site):
                 "warehouse projection leaked internal fields")
         return response["total"]
 
-    def denial_matrix(session, selected_session):
+    def denial_matrix(session, selected_session, operator_session):
         escaped_leaf = quote(leaf, safe="")
         native_item = quote(managed_item, safe="")
         scope_type = quote(SCOPE, safe="")
@@ -315,6 +319,17 @@ def verify_http(site):
             call(session, label, method, path, body=body, status=403)
         call(selected_session, "query employee Stock Entry write", "POST", "/api/resource/Stock%20Entry",
              body={"to_warehouse": leaf}, status=403)
+        stock_type = quote(DOCUMENT, safe="")
+        for label, method, path, body in (
+            ("stock document REST read", "GET", f"/api/resource/{stock_type}/{stock_document}", None),
+            ("stock document REST update", "PATCH", f"/api/v2/document/{stock_type}/{stock_document}", {"status": "Draft"}),
+            ("stock document REST delete", "DELETE", f"/api/v2/document/{stock_type}/{stock_document}", None),
+            ("stock request list", "GET", f"/api/resource/{quote(REQUEST, safe='')}", None),
+            ("operation log list", "GET", f"/api/v2/document/{quote(LOG, safe='')}", None),
+            ("internal stock executor", "POST", "/api/method/haxpower_v1.inventory.operations.synthetic.execute",
+             {"command": {"document_id": stock_document}}),
+        ):
+            call(operator_session, label, method, path, body=body, status=403)
 
     try:
         with ExitStack() as stack:
@@ -359,10 +374,10 @@ def verify_http(site):
             business(all_session, "warehouse role cannot view product", "get_sku", sku_id=sku.name, status=403)
 
             # Compare all mapped domain/native rows and raw stock counts across denied requests.
-            before = domain_snapshot(), stock_counts(), frappe.db.count("Version")
-            denial_matrix(native_session, all_session)
+            before = domain_snapshot(), stock_counts(), frappe.db.count("Version"), stock_snapshot()
+            denial_matrix(native_session, all_session, operator_session)
             frappe.db.rollback()
-            require((domain_snapshot(), stock_counts(), frappe.db.count("Version")) == before,
+            require((domain_snapshot(), stock_counts(), frappe.db.count("Version"), stock_snapshot()) == before,
                     "denied requests left a persistent side effect")
 
             for prefix in ("/api/resource", "/api/v2/document"):
@@ -410,6 +425,6 @@ def verify_http(site):
         server.server_close()
         frappe.db.rollback()
     verify_scope_concurrency(site, absent[0], company, w1.id)
-    print(f"V1-05/V1-06 cookie-session HTTP matrix: {len(outcomes)} checks", flush=True)
+    print(f"V1-05–V1-07 cookie-session HTTP matrix: {len(outcomes)} checks", flush=True)
     for label, code in outcomes:
         print(f"  {code} {label}", flush=True)

@@ -1,0 +1,23 @@
+{
+ "doctype": "DocType",
+ "name": "HP V1 Synthetic Native Detail",
+ "module": "HP V1",
+ "engine": "InnoDB",
+ "field_order": [
+  "line_id"
+ ],
+ "fields": [
+  {
+   "fieldname": "line_id",
+   "label": "Line Id",
+   "fieldtype": "Link",
+   "read_only": 1,
+   "options": "HP V1 Stock Document Line",
+   "reqd": 1
+  }
+ ],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "permissions": [],
+ "istable": 1
+}
