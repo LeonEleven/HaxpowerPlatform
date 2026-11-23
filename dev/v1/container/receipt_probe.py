@@ -188,6 +188,15 @@ def faults(payload):
     original_insert = store.insert
     count = 0
     reached = []
+    native_errors = []
+    post = native.post
+
+    def capture_native_error(*args, **kwargs):
+        try:
+            return post(*args, **kwargs)
+        except Exception as error:
+            native_errors.append(error)
+            raise
 
     def failure(label):
         reached.append(label)
@@ -276,10 +285,16 @@ def faults(payload):
          patch.object(native, "_verify_posting", refuse_realtime)),
     )
     for label, code, injection in cases:
-        with injection:
-            expect(code, lambda: service.submit(command))
-        require(reached == [label], f"fault injection did not reach {label}")
+        try:
+            with injection, patch.object(native, "post", capture_native_error):
+                expect(code, lambda: service.submit(command))
+            require(reached == [label], f"fault injection did not reach {label}")
+        except Exception as error:
+            if native_errors:
+                raise error from native_errors[-1]
+            raise
         reached.clear()
+        native_errors.clear()
         require(fresh() == initial, f"fresh connection found partial writes after {label}")
         print(f"Native receipt rolled back after {label}.", flush=True)
     require(leaked_cache_keys and all(
@@ -427,12 +442,16 @@ def verify_native_precision(payload, actor):
         frappe.db.commit()
 
 
-def run(site):
-    year = getdate().year
+def ensure_fiscal_year(date):
+    year = date.year
     fiscal = f"Synthetic Receipt {year}"
     if not frappe.db.exists("Fiscal Year", fiscal):
         frappe.get_doc(doctype="Fiscal Year", year=fiscal, year_start_date=f"{year}-01-01",
                        year_end_date=f"{year}-12-31").insert()
+
+
+def run(site):
+    ensure_fiscal_year(getdate())
     if not frappe.db.exists("Stock Entry Type", native.PURPOSE):
         frappe.get_doc(doctype="Stock Entry Type", purpose=native.PURPOSE, is_standard=1).insert(
             set_name=native.PURPOSE,
@@ -630,8 +649,20 @@ def accounting_candidate(payload):
             expect("STOCK_PERSISTENCE_FAILED", lambda: service.submit(closed))
         require(seen == ["closed"] and fresh() == initial, "native accounting closure failed to roll back")
     frappe.delete_doc(period.doctype, period.name)
-    previous_frozen = frappe.db.get_single_value("Stock Settings", "stock_frozen_upto", cache=False)
-    frappe.db.set_single_value("Stock Settings", "stock_frozen_upto", today.date() - timedelta(days=1))
+    historical_date = today - timedelta(days=1)
+    ensure_fiscal_year(historical_date.date())
+
+    def frozen_setting():
+        return frappe.db.sql(
+            "SELECT value FROM `tabSingles` WHERE doctype=%s AND field=%s",
+            ("Stock Settings", "stock_frozen_upto"),
+        )
+
+    # The Date getter coerces an unset value. Preserve the exact row so
+    # a restored site does not acquire a synthetic historical cutoff.
+    previous_frozen = frozen_setting()
+    frappe.db.set_single_value("Stock Settings", "stock_frozen_upto", historical_date.date().isoformat(),
+                               update_modified=False)
     frappe.clear_document_cache("Stock Settings", "Stock Settings")
     frappe.db.commit()
     from erpnext.stock.doctype.stock_ledger_entry import stock_ledger_entry
@@ -649,17 +680,19 @@ def accounting_candidate(payload):
         with actor_session(actor, company), service.synthetic_candidate(company, limits=LIMITS, rate=rate, allow_gl=True):
             historical = SubmitReceipt(service.create_draft(payload), uuid4().hex)
             initial = fresh()
-            with (patch.object(native, "now_datetime", return_value=today - timedelta(days=1)),
+            with (patch.object(native, "now_datetime", return_value=historical_date),
                   patch.object(stock_ledger_entry, "check_stock_frozen_date", confirm_frozen)):
                 expect("STOCK_PERSISTENCE_FAILED", lambda: service.submit(historical))
             require(seen == ["closed", "frozen"] and fresh() == initial, "native stock freeze failed to roll back")
     finally:
         if previous_frozen:
-            frappe.db.set_single_value("Stock Settings", "stock_frozen_upto", previous_frozen)
+            frappe.db.set_single_value("Stock Settings", "stock_frozen_upto", previous_frozen[0][0],
+                                       update_modified=False)
         else:
             frappe.db.delete("Singles", {"doctype": "Stock Settings", "field": "stock_frozen_upto"})
         frappe.clear_document_cache("Stock Settings", "Stock Settings")
         frappe.db.commit()
+    require(frozen_setting() == previous_frozen, "historical probe did not restore the exact Stock Settings field")
     print("Perpetual valuation: 2 units at 4.25, voucher GL debit and credit each 8.50. "
           "Unexpected GL, closed period and frozen history rolled back. Native valuation replay preserved quantity facts.",
           flush=True)
