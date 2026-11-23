@@ -138,9 +138,10 @@ V1-07 在共用库存事务中接入批次、操作权限和仓库范围。
 其中新增 6 项库存单据、请求、日志或内部执行入口拒绝。连续两次迁移、故障恢复及恢复后迁移的
 合成操作快照一致，SHA-256 为 `1af3cdaed67bb4262fb27c7b4b0ee6b1437c86fe5438ceefff964584381f9d07`。
 通过同一备份点恢复数据库、站点配置和公私文件。空站、升级站和恢复站均通过 47 项 Frappe 回归。
-恢复后再次执行并发及故障探针，核对累计 22 个已提交请求和 164 条原生替身关联。
+恢复后再次执行并发及故障探针，核对累计 22 个已提交请求和 164 条原生替身关联。Web、Socket.IO、
+非法 Host 拒绝、worker 和 scheduler 烟测通过。专属隔离项目资源已验证归属并清理。
 
-[V1-07 执行内核](TECHNICAL-DESIGN.md#v1-07-库存执行内核) · [隔离验收路径](../dev/v1/README.md#v1-07-库存事务验证)
+[V1-07 Draft PR #20](https://github.com/LeonEleven/HaxpowerPlatform/pull/20) · [PR #20 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/20/checks) · [V1-07 执行内核](TECHNICAL-DESIGN.md#v1-07-库存执行内核) · [隔离验收路径](../dev/v1/README.md#v1-07-库存事务验证)
 
 每次完成重要开发阶段时更新此节，记录日期、对应 PR 或提交、实际完成范围、验收证据、未决项及下一任务。PR 状态是带日期的核对结果，下一会话重新查询。
 
