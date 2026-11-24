@@ -187,7 +187,7 @@ Outward 与 Transit Inward 两条有效流水，原目标库位固化供接收�
 B01、B03、B08 和 B12 保持待确认，发出仅在隔离合成环境启用。下一项为 V1-11。由项目负责人
 审查并手动合并 V1-10 后，接入逐原行部分接收与剩余退回。
 
-[V1-10 分支](https://github.com/LeonEleven/HaxpowerPlatform/compare/main...feat/v1-10-transfer-dispatch) · [V1-10 技术设计](TECHNICAL-DESIGN.md#v1-10-两阶段移库发出) · [隔离验收](../dev/v1/README.md#v1-10-两阶段移库发出验证)
+[V1-10 Draft PR #23](https://github.com/LeonEleven/HaxpowerPlatform/pull/23) · [PR #23 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/23/checks) · [V1-10 技术设计](TECHNICAL-DESIGN.md#v1-10-两阶段移库发出) · [隔离验收](../dev/v1/README.md#v1-10-两阶段移库发出验证)
 
 每次完成重要开发阶段时更新此节，记录日期、对应 PR 或提交、实际完成范围、验收证据、未决项及下一任务。PR 状态是带日期的核对结果，下一会话重新查询。
 
