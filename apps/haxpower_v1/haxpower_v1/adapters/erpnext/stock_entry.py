@@ -2,7 +2,7 @@
 
 from collections import defaultdict
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 
 import frappe
@@ -20,6 +20,8 @@ BUNDLE_ROW = "Serial and Batch Entry"
 SLE = "Stock Ledger Entry"
 RECEIPT = "Material Receipt"
 ISSUE = "Material Issue"
+TRANSFER = "Material Transfer"
+DISPATCH_TYPE = "HP V1 Transfer Dispatch"
 _scope = ContextVar("hp_v1_native_stock_entry", default=None)
 
 
@@ -32,6 +34,7 @@ class Leg:
     batch: str
     uom: str
     quantity: Decimal
+    counterpart: str | None = None
 
     @property
     def source(self):
@@ -46,12 +49,13 @@ class Posting:
     entry: object
     legs: tuple[Leg, ...]
     details: dict[str, Leg]
-    bundles: dict[str, str]
+    bundles: dict[tuple[str, str], str]
     purpose: str = RECEIPT
+    inward: dict[str, Leg] = field(default_factory=dict)
 
     @property
     def action(self):
-        return "Issue" if self.purpose == ISSUE else "Receipt"
+        return {ISSUE: "Issue", RECEIPT: "Receipt", TRANSFER: "Dispatch"}[self.purpose]
 
 
 def _number(value):
@@ -64,7 +68,11 @@ def _leg(row, leg):
         (row.item_code, warehouse, row.batch_no, row.uom, row.stock_uom)
         == (leg.item, leg.warehouse, leg.batch, leg.uom, leg.uom)
         and _number(row.qty) == leg.quantity.copy_abs() and _number(row.conversion_factor) == 1
-        and not opposite and not row.serial_no and row.use_serial_batch_fields == 1
+        and (opposite or None) == leg.counterpart and not row.serial_no and row.use_serial_batch_fields == 1
+        and (not leg.counterpart or not any(row.get(key) for key in (
+            "ste_detail", "against_stock_entry", "material_request", "material_request_item",
+            "sco_rm_detail", "pick_list_item", "job_card_item",
+        )))
     )
 
 
@@ -79,52 +87,73 @@ def _bundle(doc, leg):
     )
 
 
+def _entry_shape(entry, scope):
+    transit = scope.purpose == TRANSFER
+    return (
+        entry.company == scope.company and entry.purpose == scope.purpose
+        and entry.stock_entry_type == (DISPATCH_TYPE if transit else scope.purpose)
+        and entry.add_to_transit == int(transit) and not entry.from_warehouse
+        and (scope.purpose == RECEIPT or not entry.to_warehouse)
+        and (not transit or not any(entry.get(key) for key in (
+            "outgoing_stock_entry", "work_order", "subcontracting_order", "pick_list", "is_return",
+            "additional_costs", "project", "inspection_required", "from_bom", "job_card",
+        )))
+        and len(entry.items) == len(scope.legs)
+        and all(_leg(row, leg) for row, leg in zip(entry.items, scope.legs, strict=True))
+    )
+
+
+def allows_dispatch_write(doc, event):
+    scope = _scope.get()
+    return bool(scope and scope.purpose == TRANSFER and allows_write(doc, event))
+
+
 def allows_write(doc, event):
     scope = _scope.get()
     if not scope or scope.actor != frappe.session.user or not _native_orm_active.get():
         return False
     entry = scope.entry
     if doc.doctype == ENTRY and doc is entry:
-        if event in ("before_insert", "before_validate", "before_save", "before_submit"):
-            return (
-                entry.company == scope.company and entry.purpose == scope.purpose and entry.stock_entry_type == scope.purpose
-                and entry.docstatus == (1 if event == "before_submit" or entry._action == "submit" else 0)
-                and not entry.from_warehouse and not entry.add_to_transit
-                and (scope.purpose == RECEIPT or not entry.to_warehouse)
-                and len(entry.items) == len(scope.legs)
-                and all(_leg(row, leg) for row, leg in zip(entry.items, scope.legs, strict=True))
-            )
-        return False
+        return (
+            event in ("before_insert", "before_validate", "before_save", "before_submit")
+            and entry.docstatus == (1 if event == "before_submit" or entry._action == "submit" else 0)
+            and _entry_shape(entry, scope)
+        )
     if entry.docstatus != 1:
         return False
     if doc.doctype == "Bin":
+        incoming = scope.legs if scope.purpose == RECEIPT else scope.inward.values()
         return (
-            scope.purpose == RECEIPT and event in ("before_insert", "before_validate", "before_save") and doc.is_new()
-            and any((doc.item_code, doc.warehouse) == (leg.item, leg.warehouse) for leg in scope.legs)
+            event in ("before_insert", "before_validate", "before_save") and doc.is_new()
+            and any((doc.item_code, doc.warehouse) == (leg.item, leg.warehouse) for leg in incoming)
         )
     if doc.doctype not in (BUNDLE, SLE):
         return False
+    detail = doc.voucher_detail_no
     if (
         (doc.voucher_type, doc.voucher_no, doc.company) != (ENTRY, entry.name, scope.company)
-        or not (leg := scope.details.get(doc.voucher_detail_no))
+        or not (leg := scope.details.get(detail))
     ):
         return False
+    if leg.counterpart and doc.warehouse == leg.counterpart:
+        leg = scope.inward[leg.line_id]
+    key = detail, leg.warehouse
     if doc.doctype == BUNDLE:
         if (event not in ("before_insert", "before_validate", "before_save", "before_submit", "before_change")
                 or doc.docstatus not in (0, 1) or not _bundle(doc, leg)):
             return False
         if doc.is_new() and doc.name and event == "before_validate":
-            scope.bundles.setdefault(doc.voucher_detail_no, doc.name)
+            scope.bundles.setdefault(key, doc.name)
         return (
-            (event == "before_insert" and doc.is_new() and doc.voucher_detail_no not in scope.bundles)
-            or (doc.name and scope.bundles.get(doc.voucher_detail_no) == doc.name)
+            (event == "before_insert" and doc.is_new() and key not in scope.bundles)
+            or (doc.name and scope.bundles.get(key) == doc.name)
         )
     return (
         event in ("before_insert", "before_validate", "before_submit", "before_change")
         and doc.docstatus == 1 and not doc.is_cancelled
         and (doc.item_code, doc.warehouse) == (leg.item, leg.warehouse)
         and _number(doc.actual_qty) == leg.quantity and bool(doc.serial_and_batch_bundle)
-        and scope.bundles.get(doc.voucher_detail_no) == doc.serial_and_batch_bundle
+        and scope.bundles.get(key) == doc.serial_and_batch_bundle
     )
 
 
@@ -207,45 +236,54 @@ def _balances(company, pairs, *, error="RECEIPT_NATIVE_RECONCILIATION_FAILED", p
     return buckets, bins
 
 
-def _verify_posting(scope, before, before_batch, deltas, *, allow_gl):
+def verify_entry(scope):
     entry = scope.entry
-    error = scope.action.upper()
+    error = f"{scope.action.upper()}_NATIVE_REFERENCE_INVALID"
     stored = frappe.get_doc(ENTRY, entry.name, for_update=True)
-    if (stored.company, stored.purpose, stored.stock_entry_type, stored.docstatus, stored.owner) != (
-        scope.company, scope.purpose, scope.purpose, 1, scope.actor,
-    ) or {row.name for row in stored.items} != set(scope.details):
-        raise StockError(f"{error}_NATIVE_REFERENCE_INVALID")
+    if (
+        (stored.docstatus, stored.owner) != (1, scope.actor) or not _entry_shape(stored, scope)
+        or {row.name for row in stored.items} != set(scope.details)
+    ):
+        raise StockError(error)
     posted = frappe.db.get_values(
         SLE, {"voucher_no": entry.name, "voucher_type": ENTRY},
-        ("voucher_detail_no", "item_code", "warehouse", "company", "serial_and_batch_bundle",
+        ("name", "voucher_detail_no", "item_code", "warehouse", "company", "serial_and_batch_bundle",
          "actual_qty", "docstatus", "is_cancelled"), as_dict=True, for_update=True,
     )
-    by_detail = {row.voucher_detail_no: row for row in posted}
-    if len(posted) != len(scope.details) or set(by_detail) != set(scope.details):
-        raise StockError(f"{error}_NATIVE_REFERENCE_INVALID")
+    by_leg = {(row.voucher_detail_no, row.warehouse): row for row in posted}
+    if len(posted) != len(by_leg) or len(by_leg) != len(scope.details) + len(scope.inward):
+        raise StockError(error)
     bundles = set()
     links = []
     for row in stored.items:
         leg = scope.details[row.name]
-        sle = by_detail[row.name]
-        if (
-            not _leg(row, leg) or _number(row.transfer_qty) != leg.quantity.copy_abs()
-            or not row.serial_and_batch_bundle or row.serial_and_batch_bundle in bundles
-            or (sle.item_code, sle.warehouse, sle.company, sle.serial_and_batch_bundle,
-                _number(sle.actual_qty), sle.docstatus, sle.is_cancelled)
-            != (leg.item, leg.warehouse, entry.company, row.serial_and_batch_bundle, leg.quantity, 1, 0)
-        ):
-            raise StockError(f"{error}_NATIVE_REFERENCE_INVALID")
-        bundle = frappe.get_doc(BUNDLE, row.serial_and_batch_bundle, for_update=True)
-        if (
-            (bundle.docstatus, bundle.voucher_type, bundle.voucher_no, bundle.voucher_detail_no, bundle.company)
-            != (1, ENTRY, entry.name, row.name, entry.company)
-            or not _bundle(bundle, leg)
-        ):
-            raise StockError(f"{error}_NATIVE_REFERENCE_INVALID")
-        bundles.add(bundle.name)
+        if not _leg(row, leg) or _number(row.transfer_qty) != leg.quantity.copy_abs():
+            raise StockError(error)
+        expected = (leg, scope.inward[leg.line_id]) if scope.inward else (leg,)
+        for index, effect in enumerate(expected):
+            sle = by_leg.get((row.name, effect.warehouse))
+            if not sle or (
+                sle.item_code, sle.company, _number(sle.actual_qty), sle.docstatus, sle.is_cancelled
+            ) != (effect.item, entry.company, effect.quantity, 1, 0):
+                raise StockError(error)
+            bundle_id = sle.serial_and_batch_bundle
+            if (not bundle_id or bundle_id in bundles or (index == 0 and row.serial_and_batch_bundle != bundle_id)):
+                raise StockError(error)
+            bundle = frappe.get_doc(BUNDLE, bundle_id, for_update=True)
+            if (
+                (bundle.docstatus, bundle.voucher_type, bundle.voucher_no, bundle.voucher_detail_no, bundle.company)
+                != (1, ENTRY, entry.name, row.name, entry.company) or not _bundle(bundle, effect)
+            ):
+                raise StockError(error)
+            bundles.add(bundle.name)
         links.append(NativeLink(leg.line_id, scope.action, ENTRY, entry.name, DETAIL, row.name))
+    return tuple(links)
 
+
+def _verify_posting(scope, before, before_batch, deltas, *, allow_gl):
+    links = verify_entry(scope)
+    entry = scope.entry
+    error = scope.action.upper()
     if not allow_gl and frappe.db.get_value(
         "GL Entry", {"voucher_type": ENTRY, "voucher_no": entry.name}, for_update=True,
     ):

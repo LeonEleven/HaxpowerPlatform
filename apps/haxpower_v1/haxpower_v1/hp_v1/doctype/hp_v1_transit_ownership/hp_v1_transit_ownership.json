@@ -1,0 +1,60 @@
+{
+ "doctype": "DocType",
+ "name": "HP V1 Transit Ownership",
+ "module": "HP V1",
+ "engine": "InnoDB",
+ "field_order": [
+  "operation_id",
+  "line_id",
+  "transit_location",
+  "native_detail",
+  "inward_sle"
+ ],
+ "fields": [
+  {
+   "fieldname": "operation_id",
+   "label": "Operation",
+   "read_only": 1,
+   "reqd": 1,
+   "fieldtype": "Link",
+   "options": "HP V1 Operation Log",
+   "search_index": 1
+  },
+  {
+   "fieldname": "line_id",
+   "label": "Transfer Line",
+   "read_only": 1,
+   "reqd": 1,
+   "fieldtype": "Link",
+   "options": "HP V1 Stock Document Line"
+  },
+  {
+   "fieldname": "transit_location",
+   "label": "Transit Location",
+   "read_only": 1,
+   "reqd": 1,
+   "fieldtype": "Link",
+   "options": "HP V1 Warehouse Location",
+   "search_index": 1
+  },
+  {
+   "fieldname": "native_detail",
+   "label": "Native Dispatch Detail",
+   "read_only": 1,
+   "reqd": 1,
+   "fieldtype": "Data",
+   "length": 140
+  },
+  {
+   "fieldname": "inward_sle",
+   "label": "Inward Stock Ledger Entry",
+   "read_only": 1,
+   "reqd": 1,
+   "fieldtype": "Data",
+   "length": 140
+  }
+ ],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "permissions": []
+}

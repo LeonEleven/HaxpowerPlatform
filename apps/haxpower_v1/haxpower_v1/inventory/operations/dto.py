@@ -44,6 +44,7 @@ class Command:
     lines: tuple[Line, ...]
     reason: str = ""
     original_operation: str | None = None
+    notes: str | None = None
 
 
 @dataclass(frozen=True)

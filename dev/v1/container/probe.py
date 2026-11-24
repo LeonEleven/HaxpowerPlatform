@@ -147,6 +147,10 @@ def main(action, site):
             from issue_probe import run, verify_receipts
 
             run(site) if action == "issue-execution" else verify_receipts()
+        elif action in {"transfer-dispatch", "transfer-reconcile-history"}:
+            from transfer_probe import run, verify_history
+
+            run(site) if action == "transfer-dispatch" else verify_history()
         elif action == "access-http":
             from access_probe import verify_http
 

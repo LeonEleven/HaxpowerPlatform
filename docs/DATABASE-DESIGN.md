@@ -189,3 +189,9 @@ V1 至少包括 `inventory_approval_enabled` 和
 出库复用 V1-07 的业务单头、行、请求、操作日志和原生关联表。草稿行保存源库位、显式批次类型和真实批次文本。BATCH 行同时固定已有的领域 Batch ID。NO_BATCH 行的 `batch_id` 为空，其系统 Batch 由本次执行计划解析。原生关联的 `role=Issue` 指向实际 Stock Entry Detail。该明细再关联已提交 Outward Bundle 及对应的有效负向 SLE。
 
 V1-09 沿用 V1-08 表结构。升级验收比较应用迁移前后的合成历史快照并逐桶复核，覆盖领域 ID、既有入库与请求、原生关联、Batch、Bundle、SLE、Bin 及 GL。新增出库追加业务及原生记录。恢复演练使用同一备份点的数据库、站点配置及公私文件。
+
+### V1-10 移库发出与在途归属
+
+移库复用库存单头、逐行 ID、请求和轻量操作日志。`HP V1 Stock Document` 新增业务原因及 `In Transit` 状态。已有业务行字段保存两侧领域 Location、显式批次和精确数量。状态、版本和发出操作一次更新，日志记录实际员工、服务端创建时间和原因，并关联原幂等请求。`role=Dispatch` 的日志明细将业务行连到已提交的 Stock Entry 和 Stock Entry Detail。
+
+`HP V1 Transit Ownership` 为每条原发出行创建独立 ID，保存发出操作、业务行、系统 Transit 位置、原生 Detail 和有效原生 Inward SLE。业务行、原生 Detail 和 Inward SLE 各有唯一约束。归属记录和关联在发出事务中一起写入，常规权限无维护入口。该表没有数量列。原始已发量由固化业务行与原生双向 SLE 和 Bundle 共同核对。

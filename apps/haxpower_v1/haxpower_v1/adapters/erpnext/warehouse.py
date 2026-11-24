@@ -281,11 +281,15 @@ def _reject_transit(name):
     # leaf. Unrelated native stock posting does not need mapping locks.
     if name and frappe.db.table_exists(LOCATION) and (location := _forward_mapping(name)):
         if frappe.db.get_value(WAREHOUSE, location.warehouse, "kind") == TRANSIT:
-            frappe.throw("V1 system transit can only be used by the future controlled transfer service.",
+            frappe.throw("V1 system transit requires the controlled transfer service.",
                          frappe.PermissionError)
 
 
 def guard_stock_entry(doc, method=None):
+    from .stock_entry import allows_dispatch_write
+
+    if allows_dispatch_write(doc, method):
+        return
     names = {doc.from_warehouse, doc.to_warehouse}
     for row in doc.items:
         names.update((row.s_warehouse, row.t_warehouse))
@@ -294,4 +298,7 @@ def guard_stock_entry(doc, method=None):
 
 
 def guard_transit_posting(doc, method=None):
-    _reject_transit(doc.warehouse)
+    from .stock_entry import allows_dispatch_write
+
+    if not allows_dispatch_write(doc, method):
+        _reject_transit(doc.warehouse)
