@@ -68,25 +68,30 @@ def fresh():
         return snapshot()
 
 
-def checked_result(result, draft, before, actor, *, expected_gl=0):
+def checked_result(result, draft, before, actor, *, expected_gl=0, purpose=native.PURPOSE):
+    issue = purpose == "Material Issue"
     state = fresh()
     new = {table: [row for row in records if row.name not in {old.name for old in before[table]}]
            for table, records in state.items()}
     entry, = new[native.ENTRY]
     log, = new[store.LOG]
     request, = new[store.REQUEST]
-    require((entry.owner, entry.company, entry.purpose, entry.docstatus) == (actor, draft.company, native.PURPOSE, 1),
-            "native receipt ownership or submission status differs")
+    require((entry.owner, entry.company, entry.purpose, entry.docstatus) == (actor, draft.company, purpose, 1),
+            "native stock entry ownership or submission status differs")
     require((log.name, log.actor, log.document_id, log.request_id, request.result_operation)
             == (result.operation_id, actor, result.document_id, request.name, result.operation_id),
-            "request and operation do not reference the same receipt and actor")
+            "request and operation do not reference the same document and actor")
     require(len(new["GL Entry"]) == expected_gl, "unexpected GL row count")
     require(not new["Repost Item Valuation"] and not new["Payment Ledger Entry"],
             "receipt unexpectedly created repost or payment work")
     require(result.lines == draft.lines and result.status == "Effective" and result.revision == draft.revision + 1,
-            "domain receipt result changed the draft lines")
+            "domain stock result changed the draft lines")
     require(len(new[store.LINK]) == len(new[native.DETAIL]) == len(new[native.BUNDLE]) == len(new[native.SLE])
             == len(new[native.BUNDLE_ROW]) == len(draft.lines), "native line, bundle, SLE, or link count differs")
+    new_doc = next(row for row in state[store.DOCUMENT] if row.name == draft.document_id)
+    require((new_doc.status, new_doc.revision, new_doc.effective_operation, request.status)
+            == ("Effective", result.revision, result.operation_id, "Completed"),
+            "stock request and business document must become effective together")
     with connection():
         from erpnext.stock.doctype.serial_and_batch_bundle.serial_and_batch_bundle import get_batch_qty_for_stock
 
@@ -99,24 +104,36 @@ def checked_result(result, draft, before, actor, *, expected_gl=0):
             selection = {"sku": line.sku_id, "kind": line.batch["mode"]}
             if line.batch["mode"] == "BATCH":
                 selection["original_text"] = line.batch["batchNo"]
-            batch = frappe.db.get_value(MAPPING, selection, "native_batch")
+            mapping = frappe.db.get_value(MAPPING, selection, ("name", "native_batch"), as_dict=True)
+            batch = mapping.native_batch
+            business, = [row for row in state[store.LINE] if row.name == line.line_id]
+            if issue:
+                require(business.document_id == result.document_id and business.source == line.source_location_id
+                        and not business.target and business.sku_id == line.sku_id
+                        and business.batch_id == (mapping.name if line.batch["mode"] == "BATCH" else None),
+                        "issue did not preserve the domain source and explicit Batch identity")
             part, = [row for row in new[native.BUNDLE_ROW] if row.parent == bundle.name]
             item = frappe.db.get_value(SKU, line.sku_id, "native_item")
-            leaf = frappe.db.get_value(LOCATION, line.location_id, "native_warehouse")
+            location_id = line.source_location_id if issue else line.location_id
+            leaf = frappe.db.get_value(LOCATION, location_id, "native_warehouse")
             key = item, leaf, batch
-            qty = Decimal(line.quantity)
+            qty = Decimal(line.quantity) * (-1 if issue else 1)
             expected[key] = expected.get(key, Decimal(0)) + qty
             require(
                 (link.operation_id, link.parent_id, detail.parent, ledger.voucher_no, bundle.voucher_no)
                 == (result.operation_id, entry.name, entry.name, entry.name, entry.name)
                 and (detail.item_code, ledger.item_code, bundle.item_code) == (item, item, item)
-                and (detail.t_warehouse, ledger.warehouse, bundle.warehouse) == (leaf, leaf, leaf)
+                and ((detail.s_warehouse if issue else detail.t_warehouse), ledger.warehouse, bundle.warehouse)
+                == (leaf, leaf, leaf)
+                and not (detail.t_warehouse if issue else detail.s_warehouse)
+                and bundle.type_of_transaction == ("Outward" if issue else "Inward")
+                and link.role == ("Issue" if issue else "Receipt")
                 and ledger.serial_and_batch_bundle == detail.serial_and_batch_bundle == bundle.name
                 and not ledger.is_cancelled and ledger.docstatus == bundle.docstatus == part.docstatus == 1
                 and not bundle.is_cancelled and part.batch_no == batch
                 and Decimal(str(ledger.actual_qty)) == Decimal(str(part.qty)) == qty
                 and batch not in repr(asdict(result)),
-                "native receipt row does not trace the expected domain line",
+                "native stock row does not trace the expected domain line",
             )
 
         def total(tables, item, leaf, batch):
@@ -128,7 +145,7 @@ def checked_result(result, draft, before, actor, *, expected_gl=0):
         for key, delta in expected.items():
             item, leaf, batch = key
             qty = get_batch_qty_for_stock(batch_no=batch, warehouse=leaf, item_code=item,
-                                          do_not_check_future_batches=True)
+                                          do_not_check_future_batches=True, ignore_reserved_stock=True, for_stock_levels=True)
             require(Decimal(str(qty)) == total(before, *key) + delta == total(state, *key),
                     "native Batch quantity or effective bundle total differs")
             bin_qty, = [row.actual_qty for row in state["Bin"] if row.item_code == item and row.warehouse == leaf]
@@ -141,6 +158,14 @@ def checked_result(result, draft, before, actor, *, expected_gl=0):
         }
         for key in existing_buckets - expected.keys():
             require(total(state, *key) == total(before, *key), "an unselected bucket changed")
+        if issue:
+            touched_pairs = {key[:2] for key in expected}
+
+            def untouched_bins(snapshot):
+                return {(row.item_code, row.warehouse): Decimal(str(row.actual_qty)) for row in snapshot["Bin"]
+                        if (row.item_code, row.warehouse) not in touched_pairs}
+
+            require(untouched_bins(before) == untouched_bins(state), "an unselected Bin quantity changed")
         for mapping in state[MAPPING]:
             batch = mapping.native_batch
             native_batch, = [row for row in state["Batch"] if row.name == batch]
@@ -148,6 +173,13 @@ def checked_result(result, draft, before, actor, *, expected_gl=0):
                                 if part.batch_no == batch and part.docstatus == 1 and not part.is_cancelled)
             require(Decimal(str(native_batch.batch_qty)) == total_batched,
                     "native Batch master balance differs from submitted bundles")
+    if issue:
+        for table in (native.ENTRY, native.DETAIL, native.BUNDLE, native.BUNDLE_ROW, native.SLE,
+                      "GL Entry", store.DOCUMENT, store.LINE, store.REQUEST, store.LOG, store.LINK):
+            old_rows = {row.name: row for row in before[table]
+                        if table != store.DOCUMENT or row.name != result.document_id}
+            require({row.name: row for row in state[table] if row.name in old_rows} == old_rows,
+                    f"issue rewrote historical {table} rows")
     return new
 
 

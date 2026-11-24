@@ -89,11 +89,15 @@ def resolve_existing(
     require_batch_operator()
     parsed = normalize_selection(selection)
     sku = _load_sku(sku_id, locked=False)
-    rows = _matching_rows(sku, parsed, locked=False)
+    return _resolve_existing(sku, parsed, locked=False, confirmation=confirmation)
+
+
+def _resolve_existing(sku, parsed, *, locked, confirmation=None):
+    rows = _matching_rows(sku, parsed, locked=locked)
     preview = _confirmed_preview(parsed, rows, confirmation)
     if len(rows) != 1:
         raise BatchError("BATCH_MAPPING_UNAVAILABLE")
-    return BatchResolution(_verified_batch(rows[0], sku, locked=False), preview, created=False)
+    return BatchResolution(_verified_batch(rows[0], sku, locked=locked), preview, created=False)
 
 
 def resolve_or_create(

@@ -183,3 +183,9 @@ V1 至少包括 `inventory_approval_enabled` 和
 ### V1-08 入库选择与明细关联
 
 `HP V1 Stock Document Line.batch_no` 保存入库草稿选择的领域批次文本。显式 `NO_BATCH` 时该字段为空；既有按领域 Batch ID 提交的 V1-07 行继续沿用原字段。提交解析出的 Batch 映射只在本次计划中用于定位原生批次。业务行通过 `HP V1 Operation Native Link` 关联 `Stock Entry Detail`，其父原生单据为 `Stock Entry`。Detail、Bundle 和 SLE 按同一原生明细 ID 关联。余额由 ERPNext 原生表维护。
+
+### V1-09 出库草稿、有效记录与升级
+
+出库复用 V1-07 的业务单头、行、请求、操作日志和原生关联表。草稿行保存源库位、显式批次类型和真实批次文本。BATCH 行同时固定已有的领域 Batch ID。NO_BATCH 行的 `batch_id` 为空，其系统 Batch 由本次执行计划解析。原生关联的 `role=Issue` 指向实际 Stock Entry Detail。该明细再关联已提交 Outward Bundle 及对应的有效负向 SLE。
+
+V1-09 沿用 V1-08 表结构。升级验收比较应用迁移前后的合成历史快照并逐桶复核，覆盖领域 ID、既有入库与请求、原生关联、Batch、Bundle、SLE、Bin 及 GL。新增出库追加业务及原生记录。恢复演练使用同一备份点的数据库、站点配置及公私文件。

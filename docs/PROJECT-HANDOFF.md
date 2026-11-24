@@ -153,7 +153,30 @@ Frappe 测试通过。空站含原生库存的重复迁移快照一致，完整�
 真实员工入库等待 B01、B03、B12 放行。V1-09 从 V1-08 审查和手动合并后的提交复用
 事务、权限和行关联，并接入原生 Material Issue、精确扣减及可用量校验。
 
-[V1-08 Draft PR #21](https://github.com/LeonEleven/HaxpowerPlatform/pull/21) · [PR #21 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/21/checks) · [入库技术设计](TECHNICAL-DESIGN.md#v1-08-多行-material-receipt) · [入库验收路径](../dev/v1/README.md#v1-08-多行入库验证)
+[V1-08 PR #21](https://github.com/LeonEleven/HaxpowerPlatform/pull/21) · [PR #21 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/21/checks) · [入库技术设计](TECHNICAL-DESIGN.md#v1-08-多行-material-receipt) · [入库验收路径](../dev/v1/README.md#v1-08-多行入库验证)
+
+**V1-09 多行出库，2026-11-24 核对（Asia/Shanghai）。** LeonEleven 于 2026-11-23 16:42 手动合并
+V1-08 PR #21，合并提交为 `841e3df4f046a44f63eb4787a1b8cee3c1a3d491`。App 0.10.0 从该
+基线接入多行 Material Issue、精确可用量、两种明确批次选择、共用库存锁及原生逐行核对。
+空站锁定环境通过 47 项 Frappe 回归、V1-08 原生入库和 V1-09 实际出库。独立连接核对
+同 SKU 的 STD61、STD62、NO_BATCH，以及不同品牌和库位的数量隔离。两个写连接各读到
+10 件后争用扣 7 与 6，READ COMMITTED 和保留旧读视图的 REPEATABLE READ 试验均只有
+一笔生效。验证了 `1.125 − 0.125 = 1.000`、原生及日志故障回滚、COMMIT 前断连和
+响应丢失重放。隔离永续库存样例扣 1 单位、估值减少 4.25，GL 借贷各 4.25。关闭期间、
+库存冻结和 GL 拒绝后状态一致，估值重放保持数量。
+
+本地从已合并的 V1-08 构造带真实入库的升级站，升级前后的快照 SHA-256 同为
+`48b1ef5f41615d0cb86ec2130c1d29527b8ed17378d40a85c8fa48a2f605629e`。
+新出库后两次 migrate 的快照 SHA-256 同为
+`59468fa5858e3a6f22750b918083f6aca6451501051140df3439fe1f00157a40`。
+从同一备份点恢复数据库、站点配置及公私文件后，重新逐桶核对并完成出库。空站、升级站和
+恢复站各通过 47 项 Frappe 回归。121 项真实 Cookie 会话检查覆盖原生出库 REST/Desk
+拒绝和内部出库 HTTP 入口。Web、Socket.IO、非法 Host、worker 和 scheduler 烟测通过。
+
+真实员工写入等待 B01、B03、B12 及业务授权。B08 和 B09 待业务决定。V1-10 从 V1-09
+合并后的提交开始，复用源桶检查与 Outward Bundle 的行关联。
+
+[V1-09 Draft PR #22](https://github.com/LeonEleven/HaxpowerPlatform/pull/22) · [PR #22 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/22/checks) · [V1-09 技术设计](TECHNICAL-DESIGN.md#v1-09-多行-material-issue) · [出库验收路径](../dev/v1/README.md#v1-09-多行出库验证)
 
 每次完成重要开发阶段时更新此节，记录日期、对应 PR 或提交、实际完成范围、验收证据、未决项及下一任务。PR 状态是带日期的核对结果，下一会话重新查询。
 

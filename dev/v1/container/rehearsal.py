@@ -113,18 +113,8 @@ def verify_upgraded(state, before):
     verify_catalog_schema(state)
 
 
-def verify_receipt_upgrade(state, baseline):
-    preserved = ("rows", "schema", "patches", "catalog", "sku", "warehouse", "access", "batch", "posted")
-    require(all(state[key] == baseline[key] for key in preserved),
-            "V1-08 migration changed earlier domain, mapping or stock data")
-    line = "HP V1 Stock Document Line"
-    for table, previous in baseline["operations"].items():
-        if table == line:
-            require("batch_no" in state["operations"][line]["schema"]
-                    and state["operations"][line]["rows"] == [dict(row, batch_no=None) for row in previous["rows"]],
-                    "V1-08 changed existing lines or failed to add the batch selection field")
-        else:
-            require(state["operations"][table] == previous, f"V1-08 changed {table}")
+def verify_issue_upgrade(state, baseline):
+    require(state == baseline, "V1-09 migration changed earlier domain, mapping or native stock records")
 
 
 def recovery_point(backup):
@@ -192,9 +182,10 @@ def integration():
     repeat_migration(SITE, clean)
     inspect("receipt-seed", SITE)
     inspect("receipt-execution", SITE)
-    clean_with_receipts = inspect("snapshot", SITE)
-    repeat_migration(SITE, clean_with_receipts)
-    rehearse_upgrade(clean_with_receipts)
+    inspect("issue-execution", SITE)
+    clean_with_stock = inspect("snapshot", SITE)
+    repeat_migration(SITE, clean_with_stock)
+    rehearse_upgrade(clean_with_stock)
 
 
 def rehearse_upgrade(clean):
@@ -224,7 +215,7 @@ def rehearse_upgrade(clean):
             baseline = Path(path) / "apps/haxpower_v1"
             deploy_app(fixture=baseline)
             version = run(PYTHON, "-c", "import haxpower_v1; print(haxpower_v1.__version__)", capture=True)
-            require(version.strip() == "0.8.0", "expected the merged V1-07 app")
+            require(version.strip() == "0.9.0", "expected the merged V1-08 app")
             site_command("migrate", target=UPGRADE)
             baseline_empty = inspect("snapshot", UPGRADE)
             verify_upgraded(baseline_empty, previous)
@@ -245,12 +236,13 @@ def rehearse_upgrade(clean):
                     and len(seeded["warehouse"]["native_leaves"]) == 9
                     and len(seeded["access"]["assignments"]) == 2
                     and len(seeded["batch"]["rows"]) == len(seeded["batch"]["native"]) == 5,
-                    "unexpected merged V1-07 synthetic state")
+                    "unexpected merged V1-08 synthetic state")
             inspect("sku-concurrency", UPGRADE)
             inspect("stock-execution", UPGRADE)
+            inspect("receipt-execution", UPGRADE)
             baseline_state = inspect("snapshot", UPGRADE)
-            record("merged V1-07 with existing domain, mapping, request and operation records", baseline_state)
-            rehearse_failure(baseline, baseline_state, lambda state: verify_receipt_upgrade(state, baseline_state))
+            record("merged V1-08 with existing domain, mapping, requests and native receipts", baseline_state)
+            rehearse_failure(baseline, baseline_state, lambda state: verify_issue_upgrade(state, baseline_state))
         finally:
             deploy_app()
 
@@ -261,8 +253,8 @@ def run_upgraded_rehearsal(clean, baseline_state):
     check_bench()
     site_command("migrate", target=UPGRADE)
     upgraded = inspect("snapshot", UPGRADE)
-    verify_receipt_upgrade(upgraded, baseline_state)
-    record("V1-08 upgraded from merged V1-07 with existing data preserved", upgraded)
+    verify_issue_upgrade(upgraded, baseline_state)
+    record("V1-09 upgraded from merged V1-08 with existing stock and domain data preserved", upgraded)
     inspect("verify-skus", UPGRADE)
     inspect("verify-access", UPGRADE)
     test_site(UPGRADE)
@@ -273,7 +265,9 @@ def run_upgraded_rehearsal(clean, baseline_state):
     inspect("warehouse-http", UPGRADE)
     inspect("access-http", UPGRADE)
     inspect("verify-stock", UPGRADE)
+    inspect("issue-reconcile-history", UPGRADE)
     inspect("receipt-execution", UPGRADE)
+    inspect("issue-execution", UPGRADE)
     populated = inspect("snapshot", UPGRADE)
     record("upgraded site with synthetic domain data and warehouse grants", populated)
     repeat_migration(UPGRADE, populated)
@@ -289,6 +283,8 @@ def run_upgraded_rehearsal(clean, baseline_state):
     inspect("verify-access", UPGRADE)
     inspect("verify-stock", UPGRADE)
     inspect("stock-execution", UPGRADE)
+    inspect("issue-reconcile-history", UPGRADE)
     inspect("receipt-execution", UPGRADE)
+    inspect("issue-execution", UPGRADE)
     check_installed(UPGRADE)
     require(inspect("snapshot", SITE) == clean, "upgrade rehearsal changed the clean-install site")

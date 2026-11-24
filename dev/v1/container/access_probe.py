@@ -330,6 +330,14 @@ def verify_http(site):
              {"command": {"document_id": stock_document}}),
             ("internal receipt draft", "POST", "/api/method/haxpower_v1.inventory.receipt.service.create_draft", {}),
             ("internal receipt submit", "POST", "/api/method/haxpower_v1.inventory.receipt.service.submit", {}),
+            ("internal issue draft", "POST", "/api/method/haxpower_v1.inventory.issue.service.create_draft", {}),
+            ("internal issue submit", "POST", "/api/method/haxpower_v1.inventory.issue.service.submit", {}),
+            ("internal issue availability", "POST", "/api/method/haxpower_v1.inventory.issue.service.get_availability", {}),
+            ("REST Material Issue create", "POST", "/api/resource/Stock%20Entry",
+             {"purpose": "Material Issue", "items": [{"item_code": managed_item, "s_warehouse": leaf}]}),
+            ("Desk Material Issue submit", "POST", "/api/method/frappe.desk.form.save.savedocs",
+             {"doc": frappe.as_json({"doctype": "Stock Entry", "purpose": "Material Issue",
+                                     "items": [{"item_code": managed_item, "s_warehouse": leaf}]}), "action": "Submit"}),
         ):
             call(operator_session, label, method, path, body=body, status=403)
 

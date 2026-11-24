@@ -1,4 +1,4 @@
-"""Atomic stock command execution. Only the internal synthetic action is registered in V1-07."""
+"""Atomic execution shared by stock commands."""
 
 from dataclasses import asdict, dataclass, replace
 from hashlib import sha256
@@ -25,6 +25,7 @@ class Plan:
     source_demand: dict
     target_demand: dict
     locations: dict
+    skus: dict
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,9 @@ class Action:
     apply: Callable[[Plan], tuple[NativeLink, ...]]
     verify_reference: Callable[[Plan, NativeLink], bool]
     resolve_batches: Callable | None = None
+    bind_batches_on_draft: bool = False
+    native_orm: bool = False
+    read_committed: bool = False
 
 
 def _digest(value):
@@ -233,21 +237,31 @@ def _stage(database, command, action, *, recovery):
     if document.revision != command.expected_revision:
         raise StockError("STOCK_REVISION_CONFLICT")
     _original(command)
+    # Actions which bind existing batches at draft time accept the original
+    # selection on submit and verify the resolved identity before posting.
+    input_lines = (
+        tuple(replace(line, batch_id=None) for line in stored_lines) if action.bind_batches_on_draft else stored_lines
+    )
     if tuple(replace(line, quantity="") for line in command.lines) != tuple(
-        replace(line, quantity="") for line in stored_lines
+        replace(line, quantity="") for line in input_lines
     ):
         raise StockError("STOCK_DOCUMENT_PAYLOAD_MISMATCH")
     store.insert(store.REQUEST, name=request_id, company=command.company, actor=actor, command=action.name,
                  idempotency_key=command.idempotency_key, key_digest=key_digest,
                  payload_digest=_payload(command, actor, action), document_id=document.name, status="Pending")
     skus = _resources(command, action)
-    if command.lines != stored_lines:
+    if command.lines != input_lines:
         raise StockError("STOCK_DOCUMENT_PAYLOAD_MISMATCH")
 
-    with adapter_transaction(database, native_receipt=bool(action.resolve_batches)):
+    with adapter_transaction(database, native_orm=action.native_orm):
         resolved = action.resolve_batches(command, skus) if action.resolve_batches else command
+        if action.bind_batches_on_draft and any(
+            (line.batch_id if line.batch_kind == BatchKind.BATCH else None) != stored.batch_id
+            for line, stored in zip(resolved.lines, stored_lines, strict=True)
+        ):
+            raise StockError("BATCH_MAPPING_UNAVAILABLE")
         plan = Plan(resolved, sum_demands(command.company, resolved.lines, location_field="source"),
-                    sum_demands(command.company, resolved.lines, location_field="target"), locations)
+                    sum_demands(command.company, resolved.lines, location_field="target"), locations, skus)
         links = action.apply(plan)
         _check_links(plan, action, links)
 
@@ -266,7 +280,7 @@ def _execute(command, action, *, before_guard=None, commit=None):
     command = _canonical(_shape(command, action))
     unconfirmed_commit = False
     try:
-        with connection() as database:
+        with connection(read_committed=action.read_committed) as database:
             if before_guard:
                 before_guard(database)
             result, changed = _stage(database, command, action, recovery=False)
@@ -288,7 +302,7 @@ def _execute(command, action, *, before_guard=None, commit=None):
     # Closing the failed connection precedes this current read on a new primary
     # connection. Taking the same guard waits out a server-side in-flight COMMIT.
     try:
-        with connection() as database:
+        with connection(read_committed=action.read_committed) as database:
             result, _ = _stage(database, command, action, recovery=True)
             return result
     except (StockError, frappe.PermissionError):
@@ -306,16 +320,19 @@ def _commit(database):
 def _create_draft(command, action, *, notes=""):
     command = _canonical(_shape(command, action))
     _text(notes, 4000)
-    with connection() as database:
+    with connection(read_committed=action.read_committed) as database:
         lock_stock_writes(command.company)
         policy.require_operation(action.operation, locked=True)
         _original(command)
         _authorize(command.company, command.lines, action)
-        _resources(command, action)
+        skus = _resources(command, action)
+        draft = action.resolve_batches(command, skus) if action.bind_batches_on_draft else command
         store.insert(store.DOCUMENT, name=command.document_id, company=command.company, document_type=action.name,
                      document_number=f"{action.name}-{command.document_id}", status="Draft", revision=1, notes=notes)
-        for line in command.lines:
+        for line in draft.lines:
             fields = asdict(line)
+            if line.batch_kind == BatchKind.NO_BATCH and action.bind_batches_on_draft:
+                fields["batch_id"] = None
             line_id = fields.pop("line_id")
             store.insert(store.LINE, name=line_id, document_id=command.document_id, **fields)
         _commit(database)
