@@ -173,10 +173,21 @@ V1-08 PR #21，合并提交为 `841e3df4f046a44f63eb4787a1b8cee3c1a3d491`。App 
 恢复站各通过 47 项 Frappe 回归。121 项真实 Cookie 会话检查覆盖原生出库 REST/Desk
 拒绝和内部出库 HTTP 入口。Web、Socket.IO、非法 Host、worker 和 scheduler 烟测通过。
 
-真实员工写入等待 B01、B03、B12 及业务授权。B08 和 B09 待业务决定。V1-10 从 V1-09
-合并后的提交开始，复用源桶检查与 Outward Bundle 的行关联。
+真实员工写入等待 B01、B03、B12 及业务授权。B08 和 B09 待业务决定。LeonEleven 于
+2026-11-24 09:38（Asia/Shanghai）手动合并 PR #22，合并提交为
+`b6a56e39c40bdd550d505c8cdf6507f45bc6142e`。V1-10 从该提交开始。
 
-[V1-09 Draft PR #22](https://github.com/LeonEleven/HaxpowerPlatform/pull/22) · [PR #22 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/22/checks) · [V1-09 技术设计](TECHNICAL-DESIGN.md#v1-09-多行-material-issue) · [出库验收路径](../dev/v1/README.md#v1-09-多行出库验证)
+[V1-09 PR #22](https://github.com/LeonEleven/HaxpowerPlatform/pull/22) · [PR #22 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/22/checks) · [V1-09 技术设计](TECHNICAL-DESIGN.md#v1-09-多行-material-issue) · [出库验收路径](../dev/v1/README.md#v1-09-多行出库验证)
+
+**V1-10 移库发出，2026-11-24 核对（Asia/Shanghai）。** App 0.11.0 接入多行草稿、
+源和目标仓库双侧授权、原生 Material Transfer 和逐原行在途归属。发出 Detail 关联源
+Outward 与 Transit Inward 两条有效流水，原目标库位固化供接收使用。空站 47 项 Frappe
+回归、精确两腿及跨单归属对账、双侧授权、独立连接争用和断连恢复已实测通过。独立永续库存
+候选生成 4.25 的双向库存账户 GL 后触发完整回滚。B04 同仓策略及接收岗位、
+B01、B03、B08 和 B12 保持待确认，发出仅在隔离合成环境启用。下一项为 V1-11。由项目负责人
+审查并手动合并 V1-10 后，接入逐原行部分接收与剩余退回。
+
+[V1-10 Draft PR #23](https://github.com/LeonEleven/HaxpowerPlatform/pull/23) · [PR #23 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/23/checks) · [V1-10 技术设计](TECHNICAL-DESIGN.md#v1-10-两阶段移库发出) · [隔离验收](../dev/v1/README.md#v1-10-两阶段移库发出验证)
 
 每次完成重要开发阶段时更新此节，记录日期、对应 PR 或提交、实际完成范围、验收证据、未决项及下一任务。PR 状态是带日期的核对结果，下一会话重新查询。
 

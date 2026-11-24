@@ -58,24 +58,12 @@ def _public_lines(lines):
     ) for line in sorted(lines, key=lambda line: line.line_no))
 
 
-def _resolve_batches(command, skus):
-    resolved = {}
-    for sku_id, kind, batch_no in sorted({
-        (line.sku_id, line.batch_kind, line.batch_no) for line in command.lines
-    }):
-        payload = {"mode": kind, "batchNo": batch_no} if batch_no is not None else {"mode": kind}
-        resolved[sku_id, kind, batch_no] = availability.resolve_existing(skus[sku_id], selection(payload)).id
-    return replace(command, lines=tuple(
-        replace(line, batch_id=resolved[line.sku_id, line.batch_kind, line.batch_no]) for line in command.lines
-    ))
-
-
 def _action(candidate):
     return Action(
         ACTION, policy.Operation.ISSUE, QuantitySign.POSITIVE, candidate.limits,
         {(native.ENTRY, native.DETAIL): "items"}, _authorize,
         lambda plan: native.post(plan, allow_gl=candidate.allow_gl), native.verify_link,
-        resolve_batches=_resolve_batches, bind_batches_on_draft=True, native_orm=True, read_committed=True,
+        resolve_batches=availability.resolve_existing_lines, bind_batches_on_draft=True, native_orm=True, read_committed=True,
     )
 
 

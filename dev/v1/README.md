@@ -192,3 +192,11 @@ Item 批次需在隔离站预先启用 ERPNext 的批次设置，服务通过原
 Outward Bundle、有效 SLE、Batch、Bin 和 GL。探针验证同桶合计、不同 SKU 和库位、无批次、零余额、
 精确小数、不同幂等键竞争、断连回包、财务期间与事务故障。测试用数量、批次策略和会计设置仅用于
 本次合成站点。完整验证日志随 Draft PR 的 V1 engineering CI 上传。
+
+## V1-10 两阶段移库发出验证
+
+`integration` 在锁定的 Frappe/ERPNext v16.55.0 和 MariaDB 11.8.9 上执行。升级源为 PR #22 合并提交 `b6a56e39c40bdd550d505c8cdf6507f45bc6142e`。升级站预先保存真实入库、出库、目录审计、映射、授权和请求历史。对比升级前后的业务和原生事实，运行真实发出并保存逐行归属，两次迁移后比较完整快照。在迁移故障后恢复同一备份点的数据库、站点配置及公私文件，再核对已发历史和运行新发出。
+
+探针在合成站配置单独的非标准 `HP V1 Transfer Dispatch` Stock Entry Type、明确的原生数量精度和受保护的系统 Transit 位置。发出使用合成员工身份。每次失败从新的 MariaDB 连接对比业务状态、归属和原生数量账。并发探针使用两个独立写连接和第三个复核连接。另通过真实 Cookie 会话核验内部发出、读取和原生 End Transit 入口的拒绝。
+
+[移库探针](container/transfer_probe.py) · [迁移及恢复](container/rehearsal.py) · [两腿对账和作用域](../../docs/ERPNEXT-V1-ADAPTATION-BOUNDARIES.md#v1-10-移库发出适配)

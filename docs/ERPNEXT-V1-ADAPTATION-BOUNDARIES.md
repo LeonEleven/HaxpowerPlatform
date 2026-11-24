@@ -92,3 +92,14 @@ Material Issue 通过 `Stock Entry.insert()` 和 `submit()` 过账。每行业�
 原生受控范围绑定当前员工、业务单、Stock Entry 及明细。已有的数量出处须能与已提交 Bundle、Batch 总量、Bin 和精度互相核对，才能出库。ERPNext 继续执行原生估值和关闭期间检查。允许财务候选配置的权限仅用于独立合成环境。普通员工原生 REST/Desk、取消、删除、维护和后台重估继续受原守卫约束。
 
 出库估值使用 ERPNext 从源库存计算的原生费率。锁定版本的批次估值探针从 Detail 的估值率和 Bundle 子行的 `incoming_rate` 取费率，从 Bundle 子行及 SLE 取库存价值变动，并与凭证 GL 借贷核对。该路径的 SLE `outgoing_rate` 为零。
+
+## V1-10 移库发出适配
+
+锁定的 ERPNext v16.55.0 要求启用 Add to Transit 的 Stock Entry 使用单独的非标准类型。隔离站配置 `HP V1 Transfer Dispatch`，Purpose 为 `Material Transfer` 且 `add_to_transit=1`。每行的 `s_warehouse` 是物理源叶仓，`t_warehouse` 是同公司的 Transit 类型叶仓。原生草稿和提交均携带明确的 Batch。
+[Stock Entry Type 验证](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/doctype/stock_entry_type/stock_entry_type.py#L45-L61) · [Transit 校验](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/doctype/stock_entry/stock_entry.py#L1184-L1222)
+
+原生发出使用 `insert()` 和 `submit()`。ERPNext 先依据源行建立 Outward Bundle，复制该 Bundle 生成同一 Detail 的 Inward Bundle，再分别过账源和目标方向 SLE。Detail 上的 Bundle 引用对应 Outward，入向引用从 Transit SLE 获取。对账核验两条腿、同批次、精确数量、目标物理库位、Bin 和 Batch 总量。合成候选允许原生库存估值随货移动，以会计精度核对每行净值为零，若产生 GL 则整个发出回滚。跨资产账户及正式会计配置仍由 B12 审定。
+[原生两腿过账](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/doctype/stock_entry/stock_entry.py#L2779-L2953) · [原生 Bundle 复制](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/controllers/stock_controller.py#L2872-L2922)
+
+原生作用域仅绑定认证员工、发出单、已验证源和在途叶仓及其原生行，保留 CRUD、取消、后台任务和提前提交的原有守卫。V1-11 可在自己的受控作用域使用 `outgoing_stock_entry` 和 `ste_detail`。锁定版 `make_stock_in_entry` 从发出行的原生 Transit 叶仓取源，按原生已转数量计算原行余量，通常将物理目标留空。V1-11 须使用 Haxpower 固化的目标和逐行额度。
+[原生 End Transit 映射](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/doctype/stock_entry/stock_entry.py#L5166-L5254)

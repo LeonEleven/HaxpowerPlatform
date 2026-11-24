@@ -17,11 +17,15 @@ LINE = "HP V1 Stock Document Line"
 REQUEST = "HP V1 Stock Request"
 LOG = "HP V1 Operation Log"
 LINK = "HP V1 Operation Native Link"
+TRANSIT_OWNERSHIP = "HP V1 Transit Ownership"
 SYNTHETIC_DOCUMENT = "HP V1 Synthetic Native Document"
 SYNTHETIC_DETAIL = "HP V1 Synthetic Native Detail"
-TABLES = (GUARD, DOCUMENT, LINE, REQUEST, LOG, LINK, SYNTHETIC_DOCUMENT, SYNTHETIC_DETAIL)
+TABLES = (GUARD, DOCUMENT, LINE, REQUEST, LOG, LINK, SYNTHETIC_DOCUMENT, SYNTHETIC_DETAIL, TRANSIT_OWNERSHIP)
 
 INDEXES = (
+    (TRANSIT_OWNERSHIP, "hp_v1_transit_original_line", ("line_id",)),
+    (TRANSIT_OWNERSHIP, "hp_v1_transit_native_detail", ("native_detail",)),
+    (TRANSIT_OWNERSHIP, "hp_v1_transit_inward_sle", ("inward_sle",)),
     (DOCUMENT, "hp_v1_stock_number", ("company", "document_number")),
     (LINE, "hp_v1_stock_line_order", ("document_id", "line_no")),
     (REQUEST, "hp_v1_stock_request_identity", ("company", "actor", "command", "key_digest")),
@@ -57,12 +61,12 @@ def current(doctype, identity, fields):
     return frappe.db.get_value(doctype, identity, fields, as_dict=True, for_update=True)
 
 
-def update_document(document, result):
+def update_document(document, result, *, status="Effective"):
     frappe.db.sql(
         f"""UPDATE `tab{DOCUMENT}`
-            SET status = 'Effective', revision = %s, effective_operation = %s, modified_by = %s, modified = %s
+            SET status = %s, revision = %s, effective_operation = %s, modified_by = %s, modified = %s
             WHERE name = %s AND revision = %s AND status = 'Draft' AND effective_operation IS NULL""",
-        (result.revision, result.operation_id, frappe.session.user, now_datetime(), document.name, document.revision),
+        (status, result.revision, result.operation_id, frappe.session.user, now_datetime(), document.name, document.revision),
     )
     _assert_updated("STOCK_DOCUMENT_CHANGED")
 

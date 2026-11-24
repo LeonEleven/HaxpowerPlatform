@@ -1,6 +1,6 @@
 """Current physical availability from native quantity records under the stock guard."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 
 import frappe
@@ -36,6 +36,18 @@ def resolve_existing(sku, parsed):
     except BatchError as error:
         raise StockError(error.code) from None
     return batch
+
+
+def resolve_existing_lines(command, skus):
+    resolved = {}
+    for sku_id, kind, batch_no in sorted({
+        (line.sku_id, line.batch_kind, line.batch_no) for line in command.lines
+    }):
+        payload = {"mode": kind, "batchNo": batch_no} if batch_no is not None else {"mode": kind}
+        resolved[sku_id, kind, batch_no] = resolve_existing(skus[sku_id], selection(payload)).id
+    return replace(command, lines=tuple(
+        replace(line, batch_id=resolved[line.sku_id, line.batch_kind, line.batch_no]) for line in command.lines
+    ))
 
 
 def _batch_totals(company, pairs, batch_items, bucket_totals):

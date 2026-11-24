@@ -42,6 +42,9 @@ class Action:
     bind_batches_on_draft: bool = False
     native_orm: bool = False
     read_committed: bool = False
+    final_status: str = "Effective"
+    validate_locations: Callable | None = None
+    record_effect: Callable | None = None
 
 
 def _digest(value):
@@ -65,6 +68,8 @@ def _text(value, limit, *, required=False):
 def _shape(command, action):
     _text(command.company, 140, required=True)
     _text(command.reason, 4000)
+    if command.notes is not None:
+        _text(command.notes, 4000)
     _id(command.document_id)
     if command.original_operation is not None:
         _id(command.original_operation)
@@ -120,6 +125,8 @@ def _request_identity(command, actor, action):
 def _payload(command, actor, action):
     payload = asdict(command)
     del payload["idempotency_key"]
+    if payload["notes"] is None:
+        del payload["notes"]
     for line in payload["lines"]:
         if line["batch_no"] is None:
             del line["batch_no"]
@@ -130,7 +137,9 @@ def _authorize(company, lines, action):
     locations = policy.lock_execution_locations(company, (
         location for line in lines for location in (line.source, line.target) if location is not None
     ))
-    action.authorize(company)
+    candidate = action.authorize(company)
+    if action.validate_locations:
+        action.validate_locations(lines, locations, candidate)
     return locations
 
 
@@ -149,12 +158,12 @@ def _resources(command, action):
     return skus
 
 
-def _document(command, action):
-    document = store.current(store.DOCUMENT, command.document_id, (
-        "name", "company", "document_type", "revision", "status", "effective_operation",
+def _lock_document(company, document_id, document_type):
+    document = store.current(store.DOCUMENT, document_id, (
+        "name", "company", "document_type", "revision", "status", "effective_operation", "reason", "notes",
     ))
     if not document or (document.name, document.company, document.document_type) != (
-        command.document_id, command.company, action.name,
+        document_id, company, document_type,
     ):
         policy.deny()
     rows = frappe.db.get_values(store.LINE, {"document_id": document.name}, (
@@ -200,13 +209,13 @@ def _check_links(plan, action, links):
         raise StockError("STOCK_NATIVE_REFERENCE_INCOMPLETE")
 
 
-def _replay(request, document, digest):
+def _replay(request, document, digest, final_status):
     if request.payload_digest != digest:
         raise StockError("STOCK_IDEMPOTENCY_CONFLICT")
     if request.status != "Completed" or request.document_id != document.name:
         raise StockError("STOCK_REQUEST_INCONSISTENT")
     log = store.current(store.LOG, request.result_operation, ("name", "request_id", "document_id", "result_revision"))
-    if (document.status != "Effective" or document.revision != request.result_revision
+    if (document.status != final_status or document.revision != request.result_revision
             or document.effective_operation != request.result_operation
             or not log or (log.request_id, log.document_id, log.result_revision)
             != (request.name, document.name, request.result_revision)):
@@ -224,11 +233,11 @@ def _stage(database, command, action, *, recovery):
     ))
     if request:
         # Authorize the stored object even if the retry changed its target.
-        document, stored_lines = _document(replace(command, document_id=request.document_id), action)
+        document, stored_lines = _lock_document(command.company, request.document_id, action.name)
         _authorize(command.company, stored_lines, action)
-        return _replay(request, document, _payload(command, actor, action)), False
+        return _replay(request, document, _payload(command, actor, action), action.final_status), False
 
-    document, stored_lines = _document(command, action)
+    document, stored_lines = _lock_document(command.company, command.document_id, action.name)
     locations = _authorize(command.company, stored_lines, action)
     if recovery:
         raise StockError("STOCK_RETRY_REQUIRED")
@@ -250,7 +259,10 @@ def _stage(database, command, action, *, recovery):
                  idempotency_key=command.idempotency_key, key_digest=key_digest,
                  payload_digest=_payload(command, actor, action), document_id=document.name, status="Pending")
     skus = _resources(command, action)
-    if command.lines != input_lines:
+    if (
+        command.lines != input_lines
+        or (action.final_status == "In Transit" and (command.reason, command.notes) != (document.reason, document.notes))
+    ):
         raise StockError("STOCK_DOCUMENT_PAYLOAD_MISMATCH")
 
     with adapter_transaction(database, native_orm=action.native_orm):
@@ -271,7 +283,12 @@ def _stage(database, command, action, *, recovery):
                  original_operation=command.original_operation, status="Effective", result_revision=result.revision)
     for link in links:
         store.insert(store.LINK, operation_id=result.operation_id, **asdict(link))
-    store.update_document(document, result)
+    if action.final_status == "Effective":
+        store.update_document(document, result)
+    else:
+        store.update_document(document, result, status=action.final_status)
+    if action.record_effect:
+        action.record_effect(plan, result, links)
     store.complete_request(request_id, result)
     return result, True
 
@@ -328,7 +345,8 @@ def _create_draft(command, action, *, notes=""):
         skus = _resources(command, action)
         draft = action.resolve_batches(command, skus) if action.bind_batches_on_draft else command
         store.insert(store.DOCUMENT, name=command.document_id, company=command.company, document_type=action.name,
-                     document_number=f"{action.name}-{command.document_id}", status="Draft", revision=1, notes=notes)
+                     document_number=f"{action.name}-{command.document_id}", status="Draft", revision=1, notes=notes,
+                     reason=command.reason if action.final_status == "In Transit" else None)
         for line in draft.lines:
             fields = asdict(line)
             if line.batch_kind == BatchKind.NO_BATCH and action.bind_batches_on_draft:

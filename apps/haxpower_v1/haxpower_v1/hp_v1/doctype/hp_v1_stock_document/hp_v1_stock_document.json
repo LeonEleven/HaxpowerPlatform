@@ -10,6 +10,7 @@
   "status",
   "revision",
   "notes",
+  "reason",
   "effective_operation"
  ],
  "fields": [
@@ -42,7 +43,7 @@
    "label": "Status",
    "fieldtype": "Select",
    "read_only": 1,
-   "options": "Draft\nEffective",
+   "options": "Draft\nEffective\nIn Transit",
    "reqd": 1
   },
   {
@@ -55,6 +56,12 @@
   {
    "fieldname": "notes",
    "label": "Notes",
+   "fieldtype": "Small Text",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reason",
+   "label": "Reason",
    "fieldtype": "Small Text",
    "read_only": 1
   },

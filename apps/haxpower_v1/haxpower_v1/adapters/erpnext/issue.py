@@ -16,6 +16,10 @@ def _check_configuration(legs):
     entry_type = frappe.db.get_value("Stock Entry Type", PURPOSE, ("purpose", "add_to_transit"), for_update=True)
     if entry_type != (PURPOSE, 0):
         raise StockError("ISSUE_NATIVE_CONFIGURATION")
+    check_negative_stock(legs, "ISSUE_NATIVE_NEGATIVE_STOCK_ENABLED")
+
+
+def check_negative_stock(legs, error):
     settings = frappe.db.sql(
         """
         SELECT field, value FROM tabSingles
@@ -30,7 +34,7 @@ def _check_configuration(legs):
         or any(frappe.db.get_value("Batch", batch, "allow_negative_stock_for_batch", for_update=True)
                for batch in sorted({leg.batch for leg in legs}))
     ):
-        raise StockError("ISSUE_NATIVE_NEGATIVE_STOCK_ENABLED")
+        raise StockError(error)
 
 
 def _verify_gl(entry, *, perpetual, allow_gl):
