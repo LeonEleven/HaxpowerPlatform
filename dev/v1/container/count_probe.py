@@ -377,6 +377,19 @@ def extended(site):
                     'normal valuation replay advanced quantity versions')
             _commit(db)
         before=fresh();verify_effect(stable,finish(stable),before)
+        # Orphan light native references must stop audit/rebaseline rather than
+        # silently establishing a new trustworthy generation.
+        before=fresh()
+        with connection(read_committed=True):
+            lock_stock_writes(company)
+            operation=frappe.db.get_value(store.LINK,{'parent_id':sle.voucher_no},'operation_id',for_update=True)
+            store.insert(store.LINK,operation_id=operation,line_id=uuid4().hex,role='Receipt',
+                parent_type='Stock Entry',parent_id=sle.voucher_no,detail_type='Stock Entry Detail',detail_id=uuid4().hex)
+            for check in (versions.verify,lambda:versions._rebaseline_generation_locked('Synthetic malformed history')):
+                try:check()
+                except StockError as error:require(error.code=='INVENTORY_NATIVE_HISTORY_INVALID','bad native history used wrong refusal')
+                else:raise RuntimeError('orphan native link was accepted as a valid generation baseline')
+        require(fresh()==before,'orphan-link diagnostics left repair or native state behind')
         # Epoch switch preserves counters but invalidates even unchanged quantities.
         old=actual(create(company,source,sku=sku))
         with connection(read_committed=True) as db:

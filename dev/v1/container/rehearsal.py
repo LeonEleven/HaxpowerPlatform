@@ -126,8 +126,11 @@ def verify_transfer_upgrade(state, baseline, *, failed=False):
     log, old = operations[OPERATION_LOG], baseline['operations'][OPERATION_LOG]
     require('`quantity_effect` ' in log['schema'], 'missing explicit no-quantity effect schema')
     require(all(row.get('quantity_effect') is None for row in log['rows']), 'migration rewrote historic logs')
+    # Model sync may remove a single-column custom unique index before the
+    # after_migrate hook restores it. The injected post-sync failure is earlier.
+    ignored=('`quantity_effect` ',) + (('UNIQUE KEY `hp_v1_stock_operation_request`',) if failed else ())
     normalized = lambda schema: tuple(line.strip().rstrip(',') for line in schema.splitlines()
-                                     if not line.strip().startswith('`quantity_effect` '))
+                                     if not line.strip().startswith(ignored))
     require(normalized(log['schema']) == normalized(old['schema']), 'unexpected V1-12 stock log schema change')
     operations[OPERATION_LOG] = dict(schema=old['schema'],rows=[{k:v for k,v in r.items() if k!='quantity_effect'} for r in log['rows']])
     require(dict(state, operations=operations, inventory=baseline['inventory']) == baseline,
