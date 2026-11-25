@@ -151,6 +151,17 @@ def main(action, site):
             from transfer_probe import run, verify_history
 
             run(site) if action == "transfer-dispatch" else verify_history()
+        elif action == "seed-transfer-history":
+            from transfer_probe import seed_history
+
+            seed_history()
+        elif action in {"transfer-followup", "settle-transfer-history", "resume-transfer-history"}:
+            from transfer_followup_probe import run, settle_history
+
+            if action == "transfer-followup":
+                run(site)
+            else:
+                settle_history(recovered=action == "resume-transfer-history")
         elif action == "access-http":
             from access_probe import verify_http
 

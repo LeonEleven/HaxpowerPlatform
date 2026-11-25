@@ -94,6 +94,7 @@ def _native_orm(reject):
     previous_requests = frappe.local.request_cache
     previous_dimensions = getattr(frappe.local, "pending_dimension_checks", None)
     previous_futures = getattr(frappe.local, "future_sle", None)
+    previous_perpetual = getattr(frappe.local, "enable_perpetual_inventory", None)
     previous_realtime = getattr(frappe.local, "_realtime_log", None)
     if hasattr(frappe.local, "_realtime_log"):
         del frappe.local._realtime_log
@@ -102,6 +103,9 @@ def _native_orm(reject):
     frappe.local.request_cache = defaultdict(dict)
     frappe.local.pending_dimension_checks = {}
     frappe.local.future_sle = {}
+    # ERPNext memoizes the company's accounting switch outside Frappe's cache.
+    # A Bench process can outlive a committed settings change.
+    frappe.local.enable_perpetual_inventory = {}
     try:
         yield
     finally:
@@ -116,6 +120,10 @@ def _native_orm(reject):
             del frappe.local.future_sle
         else:
             frappe.local.future_sle = previous_futures
+        if previous_perpetual is None:
+            del frappe.local.enable_perpetual_inventory
+        else:
+            frappe.local.enable_perpetual_inventory = previous_perpetual
         if hasattr(frappe.local, "_realtime_log"):
             del frappe.local._realtime_log
         if previous_realtime is not None:

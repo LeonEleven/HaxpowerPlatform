@@ -43,7 +43,7 @@
    "label": "Status",
    "fieldtype": "Select",
    "read_only": 1,
-   "options": "Draft\nEffective\nIn Transit",
+   "options": "Draft\nEffective\nIn Transit\nPartially Received\nCompleted\nClosed with Return",
    "reqd": 1
   },
   {

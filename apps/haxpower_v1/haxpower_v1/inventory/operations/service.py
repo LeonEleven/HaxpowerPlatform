@@ -14,7 +14,7 @@ from ..batch.dto import BatchError, BatchKind
 from ..batch.service import _load_sku, lock_execution_mapping
 from ..guard import lock_stock_writes
 from . import persistence as store
-from .dto import Command, Line, NativeLink, QuantitySign, Result, StockError, sum_demands
+from .dto import Command, Line, LineQuantity, NativeLink, QuantitySign, Result, StockError, sum_demands
 from .quantity import canonical_quantity, quantity_text
 from .transaction import adapter_transaction, connection
 
@@ -26,6 +26,15 @@ class Plan:
     target_demand: dict
     locations: dict
     skus: dict
+    context: object = None
+
+
+@dataclass(frozen=True)
+class Continuation:
+    command: Command
+    status: str
+    locations: dict
+    context: object
 
 
 @dataclass(frozen=True)
@@ -45,6 +54,10 @@ class Action:
     final_status: str = "Effective"
     validate_locations: Callable | None = None
     record_effect: Callable | None = None
+    document_type: str | None = None
+    prepare_continuation: Callable[..., Continuation] | None = None
+    verify_history: Callable | None = None
+    require_reason: bool = False
 
 
 def _digest(value):
@@ -67,7 +80,9 @@ def _text(value, limit, *, required=False):
 
 def _shape(command, action):
     _text(command.company, 140, required=True)
-    _text(command.reason, 4000)
+    _text(command.reason, 4000, required=action.require_reason)
+    if action.require_reason and not command.reason.strip():
+        raise StockError("STOCK_INVALID_TEXT")
     if command.notes is not None:
         _text(command.notes, 4000)
     _id(command.document_id)
@@ -82,6 +97,11 @@ def _shape(command, action):
     ids, numbers = set(), set()
     for line in command.lines:
         _id(line.line_id)
+        if action.prepare_continuation:
+            if not isinstance(line, LineQuantity) or line.line_id in ids:
+                raise StockError("STOCK_DUPLICATE_OR_INVALID_LINE")
+            ids.add(line.line_id)
+            continue
         _id(line.sku_id)
         if (type(line.line_no) is not int or not 1 <= line.line_no <= 2_147_483_647
                 or line.line_no in numbers or line.line_id in ids):
@@ -122,15 +142,15 @@ def _request_identity(command, actor, action):
     return _digest(identity), key_digest
 
 
-def _payload(command, actor, action):
+def payload_digest(command, actor, action_name):
     payload = asdict(command)
     del payload["idempotency_key"]
     if payload["notes"] is None:
         del payload["notes"]
     for line in payload["lines"]:
-        if line["batch_no"] is None:
+        if "batch_no" in line and line["batch_no"] is None:
             del line["batch_no"]
-    return _digest({"format": 1, "actor": actor, "command": action.name, "payload": payload})
+    return _digest({"format": 1, "actor": actor, "command": action_name, "payload": payload})
 
 
 def _authorize(company, lines, action):
@@ -209,18 +229,34 @@ def _check_links(plan, action, links):
         raise StockError("STOCK_NATIVE_REFERENCE_INCOMPLETE")
 
 
-def _replay(request, document, digest, final_status):
+def _replay(request, document, digest, action, actor, expected_revision):
     if request.payload_digest != digest:
         raise StockError("STOCK_IDEMPOTENCY_CONFLICT")
     if request.status != "Completed" or request.document_id != document.name:
         raise StockError("STOCK_REQUEST_INCONSISTENT")
-    log = store.current(store.LOG, request.result_operation, ("name", "request_id", "document_id", "result_revision"))
-    if (document.status != final_status or document.revision != request.result_revision
-            or document.effective_operation != request.result_operation
-            or not log or (log.request_id, log.document_id, log.result_revision)
-            != (request.name, document.name, request.result_revision)):
+    log = store.current(store.LOG, request.result_operation, (
+        "name", "request_id", "document_id", "result_revision", "result_status", "original_operation",
+        "action", "actor", "effect_key", "status",
+    ))
+    if (
+        not log or (log.request_id, log.document_id, log.result_revision, log.action, log.actor, log.status)
+        != (request.name, document.name, request.result_revision, action.name, actor, "Effective")
+        or request.result_revision != expected_revision + 1 or document.revision < log.result_revision
+    ):
         raise StockError("STOCK_REQUEST_INCONSISTENT")
-    return Result(document.name, request.result_operation, request.result_revision)
+    status = log.result_status or action.final_status
+    historical = document.revision > log.result_revision
+    if (historical and not action.verify_history) or (not historical and document.status != status):
+        raise StockError("STOCK_REQUEST_INCONSISTENT")
+    if action.prepare_continuation:
+        valid = (log.effect_key == request.name and log.result_status
+                 and log.original_operation == document.effective_operation)
+    else:
+        valid = (log.effect_key == "APPLY" and not log.original_operation and status == action.final_status
+                 and document.effective_operation == log.name)
+    if not valid:
+        raise StockError("STOCK_REQUEST_INCONSISTENT")
+    return Result(document.name, request.result_operation, request.result_revision, status)
 
 
 def _stage(database, command, action, *, recovery):
@@ -231,35 +267,44 @@ def _stage(database, command, action, *, recovery):
     request = store.current(store.REQUEST, request_id, (
         "name", "document_id", "status", "payload_digest", "result_operation", "result_revision",
     ))
+    document_type = action.document_type or action.name
     if request:
         # Authorize the stored object even if the retry changed its target.
-        document, stored_lines = _lock_document(command.company, request.document_id, action.name)
+        document, stored_lines = _lock_document(command.company, request.document_id, document_type)
         _authorize(command.company, stored_lines, action)
-        return _replay(request, document, _payload(command, actor, action), action.final_status), False
+        digest = payload_digest(command, actor, action.name)
+        result = _replay(request, document, digest, action, actor, command.expected_revision)
+        if action.verify_history:
+            action.verify_history(document, stored_lines)
+        return result, False
 
-    document, stored_lines = _lock_document(command.company, command.document_id, action.name)
+    document, stored_lines = _lock_document(command.company, command.document_id, document_type)
     locations = _authorize(command.company, stored_lines, action)
     if recovery:
         raise StockError("STOCK_RETRY_REQUIRED")
-    if document.status != "Draft" or document.effective_operation is not None:
+    if not action.prepare_continuation and (document.status != "Draft" or document.effective_operation is not None):
         raise StockError("STOCK_DOCUMENT_ALREADY_EFFECTIVE")
     if document.revision != command.expected_revision:
         raise StockError("STOCK_REVISION_CONFLICT")
     _original(command)
-    # Actions which bind existing batches at draft time accept the original
-    # selection on submit and verify the resolved identity before posting.
-    input_lines = (
-        tuple(replace(line, batch_id=None) for line in stored_lines) if action.bind_batches_on_draft else stored_lines
-    )
-    if tuple(replace(line, quantity="") for line in command.lines) != tuple(
-        replace(line, quantity="") for line in input_lines
-    ):
-        raise StockError("STOCK_DOCUMENT_PAYLOAD_MISMATCH")
+    digest = payload_digest(command, actor, action.name)
     store.insert(store.REQUEST, name=request_id, company=command.company, actor=actor, command=action.name,
                  idempotency_key=command.idempotency_key, key_digest=key_digest,
-                 payload_digest=_payload(command, actor, action), document_id=document.name, status="Pending")
+                 payload_digest=digest, document_id=document.name, status="Pending")
+    continuation = action.prepare_continuation(command, document, stored_lines, locations) if action.prepare_continuation else None
+    if continuation:
+        command, locations = continuation.command, continuation.locations
+    else:
+        # Bound drafts accept the original selection on submit. Recheck the
+        # resolved mapping ID separately before native posting.
+        input_lines = (tuple(replace(line, batch_id=None) for line in stored_lines)
+                       if action.bind_batches_on_draft else stored_lines)
+        if tuple(replace(line, quantity="") for line in command.lines) != tuple(
+            replace(line, quantity="") for line in input_lines
+        ):
+            raise StockError("STOCK_DOCUMENT_PAYLOAD_MISMATCH")
     skus = _resources(command, action)
-    if (
+    if not continuation and (
         command.lines != input_lines
         or (action.final_status == "In Transit" and (command.reason, command.notes) != (document.reason, document.notes))
     ):
@@ -273,23 +318,23 @@ def _stage(database, command, action, *, recovery):
         ):
             raise StockError("BATCH_MAPPING_UNAVAILABLE")
         plan = Plan(resolved, sum_demands(command.company, resolved.lines, location_field="source"),
-                    sum_demands(command.company, resolved.lines, location_field="target"), locations, skus)
+                    sum_demands(command.company, resolved.lines, location_field="target"), locations, skus,
+                    continuation.context if continuation else None)
         links = action.apply(plan)
         _check_links(plan, action, links)
 
-    result = Result(document.name, uuid4().hex, document.revision + 1)
+    status = continuation.status if continuation else action.final_status
+    result = Result(document.name, uuid4().hex, document.revision + 1, status)
     store.insert(store.LOG, name=result.operation_id, action=action.name, document_id=document.name,
-                 request_id=request_id, actor=actor, effect_key="APPLY", reason=command.reason,
-                 original_operation=command.original_operation, status="Effective", result_revision=result.revision)
+                 request_id=request_id, actor=actor, effect_key=request_id if continuation else "APPLY",
+                 reason=command.reason, notes=command.notes, original_operation=command.original_operation,
+                 status="Effective", result_revision=result.revision, result_status=status)
     for link in links:
         store.insert(store.LINK, operation_id=result.operation_id, **asdict(link))
-    if action.final_status == "Effective":
-        store.update_document(document, result)
-    else:
-        store.update_document(document, result, status=action.final_status)
+    store.update_document(document, result)
+    store.complete_request(request_id, result)
     if action.record_effect:
         action.record_effect(plan, result, links)
-    store.complete_request(request_id, result)
     return result, True
 
 

@@ -356,8 +356,8 @@ def verify_history():
             company, {(item, leaf.native_warehouse) for item in items},
             [_load_sku(row.name, locked=True) for row in skus],
         )
-        owned = transit.active_inward(company, items, leaf, buckets)
-        require(len(owned) == frappe.db.count(transit.OWNERSHIP), "historical transit lines were lost")
+        owned = transit.reconcile(company, items, leaf, buckets).originals
+        require(len(owned) == frappe.db.count(transit.OWNERSHIP, {"transit_location": leaf.name}), "historical transit lines were lost")
         print(f"Reconciled {len(owned)} persisted original transit lines against native inventory.", flush=True)
 
 
@@ -525,3 +525,34 @@ def run(site):
     accounting_candidate(sample)
     print("Transfer: source and target independently authorized, exact Decimal buckets, native two-leg identity, "
           "distinct same-bucket ownerships and isolated same-warehouse fixture verified.", flush=True)
+
+
+UPGRADE_MARKER = "V1-11 historical dispatch"
+
+
+def followup_fixture():
+    company, _ = _company_and_parent()
+    warehouse_ids = [row.id for row in warehouse.list_warehouses(company=company)[:2]]
+    label = "R" + uuid4().hex[:10].upper()
+    source, target = [warehouse.create_location(identifier, code=label, display_name=label).id
+                      for identifier in warehouse_ids]
+    actor, _ = synthetic_user(label.lower(), "transfer-followup", Operation.TRANSFER, Operation.RECEIVE)
+    set_scope(actor, company, Mode.SELECTED, warehouse_ids)
+    for kind, add_to_transit in ((stock.TRANSFER, 0), (stock.DISPATCH_TYPE, 1)):
+        if not frappe.db.exists("Stock Entry Type", kind):
+            frappe.get_doc(doctype="Stock Entry Type", purpose=stock.TRANSFER,
+                           add_to_transit=add_to_transit, is_standard=int(not add_to_transit)).insert(set_name=kind)
+    frappe.db.commit()
+    return actor, company, warehouse_ids, TransferLineInput(_sku_id("A"), source, target, STD61, "10", PREFIX)
+
+
+def seed_history():
+    # Called with the pinned V1-10 App still installed. Only V1-10 DTOs are needed here.
+    actor, company, _, sample = followup_fixture()
+    seed_receipts(company, actor, (replace(sample, quantity="20"),))
+    with actor_session(actor, company), service.synthetic_candidate(company, limits=LIMITS):
+        for index in (1, 2):
+            reason = f"{UPGRADE_MARKER} {index}"
+            draft = service.create_draft(TransferDraftInput(company, (sample,), reason, "Original V1-10 notes"))
+            post(DispatchTransfer(draft, f"v111-upgrade-dispatch-{index}"))
+    print("Persisted two real V1-10 dispatches before changing App revision.", flush=True)

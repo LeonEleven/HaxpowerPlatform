@@ -12,7 +12,9 @@
   "reason",
   "original_operation",
   "status",
-  "result_revision"
+  "result_revision",
+  "notes",
+  "result_status"
  ],
  "fields": [
   {
@@ -83,6 +85,19 @@
    "fieldtype": "Int",
    "read_only": 1,
    "reqd": 1
+  },
+  {
+   "fieldname": "notes",
+   "label": "Notes",
+   "fieldtype": "Small Text",
+   "read_only": 1
+  },
+  {
+   "fieldname": "result_status",
+   "label": "Result Status",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 40
   }
  ],
  "allow_rename": 0,

@@ -56,6 +56,42 @@ class DispatchResult:
 
 
 @dataclass(frozen=True)
+class TransferQuantity:
+    transfer_line_id: str
+    quantity: str
+
+
+@dataclass(frozen=True)
+class ReceiveTransfer:
+    company: str
+    transfer_id: str
+    expected_revision: int
+    idempotency_key: str
+    lines: tuple[TransferQuantity, ...]
+    reason: str = ""
+    notes: str = ""
+
+
+@dataclass(frozen=True)
+class ReturnTransfer:
+    company: str
+    transfer_id: str
+    expected_revision: int
+    idempotency_key: str
+    lines: tuple[TransferQuantity, ...]
+    reason: str
+    notes: str = ""
+
+
+@dataclass(frozen=True)
+class TransferActionResult:
+    transfer_id: str
+    operation_id: str
+    status: str
+    revision: int
+
+
+@dataclass(frozen=True)
 class DispatchLine:
     transfer_line_id: str
     sku_id: str
@@ -70,6 +106,9 @@ class DispatchLine:
     native_entry: str
     native_detail: str
     native_inward_sle: str
+    received_quantity: str
+    returned_quantity: str
+    remaining_quantity: str
 
 
 @dataclass(frozen=True)

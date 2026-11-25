@@ -10,7 +10,8 @@
   "parent_type",
   "parent_id",
   "detail_type",
-  "detail_id"
+  "detail_id",
+  "ownership_id"
  ],
  "fields": [
   {
@@ -68,6 +69,14 @@
    "read_only": 1,
    "length": 140,
    "reqd": 1
+  },
+  {
+   "fieldname": "ownership_id",
+   "label": "Original Transit Ownership",
+   "fieldtype": "Link",
+   "options": "HP V1 Transit Ownership",
+   "read_only": 1,
+   "search_index": 1
   }
  ],
  "allow_rename": 0,
