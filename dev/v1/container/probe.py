@@ -180,6 +180,10 @@ def main(action, site):
             history=versions.verify()
             require(bool(history), 'upgrade did not backfill any native quantity history')
             print(f'Inventory epoch ready: {len(history)} historical buckets, including zero/transit; native facts verified.')
+        elif action == "version-backfill-fault":
+            from count_probe import backfill_fault
+
+            backfill_fault()
         elif action in {'count-recovery-prepare','count-recovery-finish'}:
             from count_probe import recovery_prepare, recovery_finish
 

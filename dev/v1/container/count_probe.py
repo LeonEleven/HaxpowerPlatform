@@ -336,10 +336,28 @@ def extended(site):
             item=frappe.db.get_value('HP V1 Stock Item',sku,'native_item')
             leaf=frappe.db.get_value(LOCATION,source,'native_warehouse')
             sle=frappe.db.get_value('Stock Ledger Entry',{'item_code':item,'warehouse':leaf},
-                ('name','posting_date','posting_time','voucher_type','voucher_no','creation'),as_dict=True,order_by='creation asc')
-            stock_ledger.update_entries_after(dict(item_code=item,warehouse=leaf,posting_date=sle.posting_date,
-                posting_time=sle.posting_time,voucher_type=sle.voucher_type,voucher_no=sle.voucher_no,
-                sle_id=sle.name,creation=sle.creation,reserved_stock=0),allow_negative_stock=False)
+                ('name','posting_date','posting_time','voucher_type','voucher_no','voucher_detail_no','serial_and_batch_bundle','actual_qty','creation'),as_dict=True,order_by='creation desc')
+            # Use the existing native adapter's exact voucher/Bundle scope for
+            # this synthetic maintenance proof; background maintenance stays closed.
+            from haxpower_v1.inventory.operations.dto import Bucket
+            from haxpower_v1.inventory.operations.transaction import adapter_transaction
+            from haxpower_v1.inventory.batch.persistence import MAPPING
+            require(sle.voucher_type==stock_entry.ENTRY and Decimal(str(sle.actual_qty))>0,
+                    'revaluation fixture must target the latest material receipt')
+            batch=frappe.db.get_value(MAPPING,{'sku':sku,'kind':'NO_BATCH'},'native_batch',for_update=True)
+            leg=stock_entry.Leg('synthetic-revaluation',Bucket(company,sku,source,'NO_BATCH',None),
+                                item,leaf,batch,PREFIX,Decimal(str(sle.actual_qty)))
+            entry=frappe.get_doc(stock_entry.ENTRY,sle.voucher_no,for_update=True)
+            scope=stock_entry.Posting(actor,'synthetic-revaluation',company,entry,(leg,),
+                {sle.voucher_detail_no:leg},{(sle.voucher_detail_no,leaf):sle.serial_and_batch_bundle})
+            token=stock_entry._scope.set(scope)
+            try:
+                with adapter_transaction(db,native_orm=True):
+                    stock_ledger.update_entries_after(dict(item_code=item,warehouse=leaf,posting_date=sle.posting_date,
+                        posting_time=sle.posting_time,voucher_type=sle.voucher_type,voucher_no=sle.voucher_no,
+                        sle_id=sle.name,creation=sle.creation,reserved_stock=0),allow_negative_stock=False)
+            finally:
+                stock_entry._scope.reset(token)
             require(versions.verify()==oldfacts and frappe.get_all(versions.VERSION,fields=['*'],order_by='name')==oldversions,
                     'normal valuation replay advanced quantity versions')
             _commit(db)
@@ -482,17 +500,33 @@ def native_boundaries(site):
             reject('STOCK_PERSISTENCE_FAILED',lambda:finish(task))
     finally:
         frappe.delete_doc(period.doctype,period.name);frappe.db.commit()
-    old=frappe.db.get_single_value('Stock Settings','stock_frozen_upto')
+    old=frappe.db.sql("SELECT value FROM tabSingles WHERE doctype='Stock Settings' AND field='stock_frozen_upto'")
     frappe.db.set_single_value('Stock Settings','stock_frozen_upto',today,update_modified=False)
     frappe.clear_document_cache('Stock Settings','Stock Settings');frappe.db.commit()
     try:
         with actor_session(actor,company),counts.synthetic_candidate(company,limits=LIMITS):
             reject('STOCK_PERSISTENCE_FAILED',lambda:finish(task))
     finally:
-        frappe.db.set_single_value('Stock Settings','stock_frozen_upto',old,update_modified=False)
+        if old:
+            frappe.db.set_single_value('Stock Settings','stock_frozen_upto',old[0][0],update_modified=False)
+        else:
+            frappe.db.delete('Singles',{'doctype':'Stock Settings','field':'stock_frozen_upto'})
         frappe.clear_document_cache('Stock Settings','Stock Settings');frappe.db.commit()
     with actor_session(actor,company),counts.synthetic_candidate(company,limits=LIMITS):
-        before=fresh();verify_effect(task,finish(task),before)
+        before=fresh();result=finish(task);verify_effect(task,result,before)
+        link=next(r for r in fresh()[store.LINK] if r.operation_id==result.operation_id)
+        for action in ('cancel','delete','change'):
+            baseline=fresh()
+            doc=frappe.get_doc('Stock Reconciliation',link.parent_id)
+            doc.flags.ignore_permissions=True
+            try:
+                if action=='cancel':doc.cancel()
+                elif action=='delete':doc.delete(ignore_permissions=True)
+                else:doc.db_set('purpose','Opening Stock')
+            except (frappe.PermissionError,frappe.ValidationError):pass
+            else:raise RuntimeError('native count lifecycle bypass accepted '+action)
+            frappe.db.rollback()
+            require(fresh()==baseline,'native count lifecycle refusal changed stock or versions')
     # A separate synthetic company proves actual perpetual inventory GL behavior.
     from warehouse_probe import make_company
     marker='G'+uuid4().hex[:6].upper()
@@ -519,3 +553,30 @@ def native_boundaries(site):
         require(sum(Decimal(str(r.debit)) for r in observed)==Decimal('4.25')
                 and sum(Decimal(str(r.credit)) for r in observed)==Decimal('4.25'),'count did not exercise real balanced 4.25 GL')
     print('COUNT native boundaries: second row rollback, direct native/system CRUD denial, closed period, freeze and 4.25 GL rejection passed.',flush=True)
+
+
+def backfill_fault():
+    """Invoke real initialization with a second-counter fault on the V1-11 upgrade."""
+    require(not frappe.db.get_value(versions.EPOCH,'inventory'),'backfill fault needs the uninitialized upgrade state')
+    before=fresh()
+    original=versions.insert
+    writes=[]
+    def fail_second(doctype,**fields):
+        if doctype==versions.VERSION:
+            writes.append(fields)
+            if len(writes)==2:raise RuntimeError('Synthetic second inventory baseline counter failure')
+        return original(doctype,**fields)
+    try:
+        with connection(read_committed=True),patch.object(versions,'insert',fail_second):
+            versions.ensure_schema()
+    except RuntimeError as error:
+        require(str(error)=='Synthetic second inventory baseline counter failure','unexpected backfill failure')
+    else:raise RuntimeError('backfill did not reach injected baseline failure')
+    require(len(writes)==2 and fresh()==before,'failed baseline left Ready epoch, partial counters or native changes')
+    with connection():
+        from haxpower_v1.inventory.guard import lock_stock_writes
+        lock_stock_writes()
+        try:versions.epoch()
+        except StockError as error:require(error.code=='INVENTORY_VERSION_NOT_READY','wrong missing epoch refusal')
+        else:raise RuntimeError('failed backfill left quantity execution open')
+    print('V1-11 upgrade baseline failure: actual initializer rolled back epoch and partial counters; quantity execution remains closed.',flush=True)

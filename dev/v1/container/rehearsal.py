@@ -271,7 +271,10 @@ def rehearse_upgrade(clean):
             inspect("settle-transfer-history", UPGRADE)
             baseline_state = inspect("snapshot", UPGRADE)
             record("merged V1-11 with native dispatch, receipt and return history, ownership, authorized requests, receipts and issues", baseline_state)
-            rehearse_failure(baseline, baseline_state, lambda state: verify_transfer_upgrade(state, baseline_state, failed=True))
+            def failed_upgrade(state):
+                verify_transfer_upgrade(state, baseline_state, failed=True)
+                inspect('version-backfill-fault', UPGRADE)
+            rehearse_failure(baseline, baseline_state, failed_upgrade)
         finally:
             deploy_app()
 
