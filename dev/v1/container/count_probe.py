@@ -137,6 +137,10 @@ def compete(site,actor,company,first,second):
 
 
 def run(site):
+    # A migrated fixture can have a cached Dynamic Link map from its earlier
+    # Stock Entries. Clear it before the first native reconciliation, outside
+    # the protected stock transaction that rejects deferred callbacks.
+    frappe.clear_cache()
     frappe.db.set_default("float_precision", "3")
     for purpose in ('Material Receipt','Material Issue'):
         if not frappe.db.exists('Stock Entry Type',purpose):
