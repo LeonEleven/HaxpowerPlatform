@@ -1,0 +1,43 @@
+{
+ "doctype": "DocType",
+ "name": "HP V1 Inventory Epoch",
+ "module": "HP V1",
+ "engine": "InnoDB",
+ "field_order": [
+  "generation",
+  "state",
+  "baseline_at",
+  "reason"
+ ],
+ "fields": [
+  {
+   "fieldname": "generation",
+   "label": "Generation",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "state",
+   "label": "State",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "baseline_at",
+   "label": "Baseline At",
+   "fieldtype": "Datetime",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reason",
+   "label": "Reason",
+   "fieldtype": "Small Text",
+   "read_only": 1
+  }
+ ],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "permissions": []
+}

@@ -1,0 +1,131 @@
+{
+ "doctype": "DocType",
+ "name": "HP V1 Stock Count",
+ "module": "HP V1",
+ "engine": "InnoDB",
+ "field_order": [
+  "company",
+  "location_id",
+  "scope",
+  "sku_id",
+  "batch_kind",
+  "batch_id",
+  "batch_no",
+  "snapshot_id",
+  "snapshot_at",
+  "generation",
+  "scope_version",
+  "original_task",
+  "recount_task",
+  "counted_by",
+  "counted_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "company",
+   "label": "Company",
+   "fieldtype": "Link",
+   "read_only": 1,
+   "options": "Company"
+  },
+  {
+   "fieldname": "location_id",
+   "label": "Location Id",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "scope",
+   "label": "Scope",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "sku_id",
+   "label": "Sku Id",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "batch_kind",
+   "label": "Batch Kind",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "batch_id",
+   "label": "Batch Id",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "batch_no",
+   "label": "Batch No",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "snapshot_id",
+   "label": "Snapshot Id",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "snapshot_at",
+   "label": "Snapshot At",
+   "fieldtype": "Datetime",
+   "read_only": 1
+  },
+  {
+   "fieldname": "generation",
+   "label": "Generation",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "scope_version",
+   "label": "Scope Version",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "original_task",
+   "label": "Original Task",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "recount_task",
+   "label": "Recount Task",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "counted_by",
+   "label": "Counted By",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "counted_at",
+   "label": "Counted At",
+   "fieldtype": "Datetime",
+   "read_only": 1
+  }
+ ],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "permissions": []
+}

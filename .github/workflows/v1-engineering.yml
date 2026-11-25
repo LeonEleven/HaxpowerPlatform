@@ -10,7 +10,7 @@ permissions:
 jobs:
   isolated-install-and-migrate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 90
     env:
       HP_V1_PROJECT: haxpower-v1-ci-${{ github.run_id }}-${{ github.run_attempt }}
     defaults:
@@ -43,7 +43,7 @@ jobs:
             python3 dev/v1/v1.py preflight
           } 2>&1 | tee "$RUNNER_TEMP/hp-v1-evidence/preflight.log"
 
-      - name: Test native stock movements, transfer settlement, guards and repeatable migrations
+      - name: Test counts, quantity versions, native movements, guards and recovery
         run: |
           {
             python3 dev/v1/v1.py up

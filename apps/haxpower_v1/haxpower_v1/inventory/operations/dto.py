@@ -51,6 +51,7 @@ class Command:
     reason: str = ""
     original_operation: str | None = None
     notes: str | None = None
+    snapshot_id: str | None = None
 
 
 @dataclass(frozen=True)

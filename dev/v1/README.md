@@ -216,3 +216,19 @@ Outward Bundle、有效 SLE、Batch、Bin 和 GL。探针验证同桶合计、�
 验证历史状态与原发出重放在整个过程保持一致。
 
 [生命周期探针](container/transfer_followup_probe.py) · [升级与恢复](container/rehearsal.py)
+
+## V1-12 非冻结盘点和库存版本验证
+
+App 0.13.0 从已合并 V1-11 `2c8f42970112176b61e198081b82e084688c7649` 升级。
+B05 四项正式批准见 [决策记录](../../docs/DECISIONS.md#8-b05-正式盘点规则2026-11-25)。
+专属 CI 使用空站、该合并版本生成的真实合成库存升级站，以及同点备份恢复；禁止复用 Spike 数据。
+
+`probe.py stock-count <site>` 在已完成 receipt-seed / receipt-execution 的隔离站执行真实 Stock Reconciliation，
+覆盖三种范围、混合批次与品牌、实盘零、零账面盘盈、发现新桶、无差异完成、范围隔离、往返陈旧、重盘、
+幂等与失权、双连接争用、原生提交后故障、版本/任务/请求回滚及提交断连。独立连接复核原生凭证、
+Bundle、有效 SLE、Batch、Bin、GL、任务、版本、请求和日志。故障注入只替换测试边界，实际库存由原生引擎执行。
+
+`probe.py verify-inventory-versions <site>` 验证历史零桶及 Transit 的回填和原生数量证据；
+重复 migrate 必须保持代次、版本、任务和库存快照。版本初始化在 DDL 后持共享守卫完成；缺少 Ready 代次或
+数量历史不连续时全部数量命令拒绝。`_rotate_generation_locked` 是需独立系统维护能力的内部接缝，
+不定义 B11/B12 灾后放行政策。A06 保留 V1-13 审批、V1-20 发布回归和生产签核条件。

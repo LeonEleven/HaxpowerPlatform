@@ -182,7 +182,11 @@ class StockEntryBundlePermissions:
         # ERPNext saves the draft bundle and submits it from SLE.on_submit
         # using the current session. Grant only those document-level calls.
         events = {"create": "before_insert", "write": "before_validate", "submit": "before_submit"}
-        if user in (None, frappe.session.user) and permtype in events and allows_write(self, events[permtype]):
+        from . import stock_count
+
+        if user in (None, frappe.session.user) and permtype in events and (
+            allows_write(self, events[permtype]) or stock_count.allows_write(self, events[permtype])
+        ):
             return True
         return super().has_permission(permtype, debug=debug, user=user)
 

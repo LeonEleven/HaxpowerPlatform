@@ -1,0 +1,153 @@
+{
+ "doctype": "DocType",
+ "name": "HP V1 Stock Count Line",
+ "module": "HP V1",
+ "engine": "InnoDB",
+ "field_order": [
+  "task_id",
+  "line_no",
+  "sku_id",
+  "location_id",
+  "batch_kind",
+  "batch_id",
+  "batch_no",
+  "uom",
+  "snapshot_quantity",
+  "actual_quantity",
+  "difference_quantity",
+  "bucket_version",
+  "confirmed",
+  "discovered",
+  "counted_by",
+  "counted_at",
+  "notes",
+  "bucket_key"
+ ],
+ "fields": [
+  {
+   "fieldname": "task_id",
+   "label": "Task Id",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "line_no",
+   "label": "Line No",
+   "fieldtype": "Int",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sku_id",
+   "label": "Sku Id",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "location_id",
+   "label": "Location Id",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "batch_kind",
+   "label": "Batch Kind",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "batch_id",
+   "label": "Batch Id",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "batch_no",
+   "label": "Batch No",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "uom",
+   "label": "Uom",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "snapshot_quantity",
+   "label": "Snapshot Quantity",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "actual_quantity",
+   "label": "Actual Quantity",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "difference_quantity",
+   "label": "Difference Quantity",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "bucket_version",
+   "label": "Bucket Version",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "confirmed",
+   "label": "Confirmed",
+   "fieldtype": "Check",
+   "read_only": 1
+  },
+  {
+   "fieldname": "discovered",
+   "label": "Discovered",
+   "fieldtype": "Check",
+   "read_only": 1
+  },
+  {
+   "fieldname": "counted_by",
+   "label": "Counted By",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "counted_at",
+   "label": "Counted At",
+   "fieldtype": "Datetime",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes",
+   "label": "Notes",
+   "fieldtype": "Small Text",
+   "read_only": 1
+  },
+  {
+   "fieldname": "bucket_key",
+   "label": "Bucket Key",
+   "fieldtype": "Data",
+   "length": 64,
+   "read_only": 1,
+   "reqd": 1
+  }
+ ],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "permissions": []
+}

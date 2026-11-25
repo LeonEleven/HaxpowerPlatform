@@ -111,3 +111,9 @@ doc_events["Item"]["before_validate"] = [f"{_item_adapter}.guard_item_change", _
 doc_events["Item"]["before_change"] = [f"{_item_adapter}.guard_item_change", _item_reference_guard]
 doc_events["DocShare"] = dict.fromkeys(("before_insert", "before_validate", "before_change"),
                                       f"{_access}.guard_sharing")
+
+# Protected baseline after all stock schema/index hooks have completed.
+after_install.append("haxpower_v1.inventory.versions.ensure_schema")
+
+after_install.append("haxpower_v1.adapters.erpnext.stock_count.ensure_schema")
+has_permission["Stock Reconciliation"] = "haxpower_v1.adapters.erpnext.stock_count.permission"

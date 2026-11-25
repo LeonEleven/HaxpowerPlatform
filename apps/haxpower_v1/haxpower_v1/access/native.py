@@ -2,7 +2,7 @@
 
 import frappe
 
-from ..adapters.erpnext import batch, item, stock_entry, warehouse
+from ..adapters.erpnext import batch, item, stock_entry, stock_count, warehouse
 from ..catalog.sku_persistence import SKU
 from ..warehouse.persistence import LOCATION
 from .policy import deny
@@ -26,7 +26,7 @@ def _references(doc, *, locked):
 
 
 def guard_stock_document(doc, method=None, *, target=None, merge=False):
-    if stock_entry.allows_write(doc, method):
+    if stock_entry.allows_write(doc, method) or stock_count.allows_write(doc, method):
         doc.flags.notify_update = False
         if doc.doctype == stock_entry.ENTRY:
             doc.flags.ignore_version = True

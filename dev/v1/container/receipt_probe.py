@@ -56,6 +56,10 @@ def snapshot():
         "Item", MAPPING, store.DOCUMENT, store.LINE, store.REQUEST, store.LOG, store.LINK,
     )
     state = {table: frappe.get_all(table, fields=["*"], order_by="name") for table in doctypes}
+    for table in ('HP V1 Inventory Epoch','HP V1 Inventory Version','HP V1 Stock Count','HP V1 Stock Count Line',
+                  'Stock Reconciliation','Stock Reconciliation Item'):
+        if frappe.db.table_exists(table):
+            state[table]=frappe.get_all(table,fields=['*'],order_by='name')
     state["Version"] = frappe.get_all(
         "Version", filters={"ref_doctype": ("in", [native.ENTRY, native.BUNDLE, native.SLE, "Item", "Batch"])},
         fields=["*"], order_by="name",

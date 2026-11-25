@@ -122,35 +122,19 @@ def verify_upgraded(state, before):
 
 
 def verify_transfer_upgrade(state, baseline, *, failed=False):
-    operations = dict(state["operations"])
-    for table, columns, indexes in (
-        (OPERATION_LOG, {"notes", "result_status"}, {"hp_v1_stock_operation_revision"}),
-        (NATIVE_LINK, {"ownership_id"}, {"ownership_id_index"}),
-    ):
-        current, old = operations[table], baseline["operations"][table]
-        require(all(f"`{field}` " in current["schema"] for field in columns)
-                and (failed or all(f"KEY `{index}`" in current["schema"] for index in indexes)),
-                "missing V1-11 operation history or ownership schema")
-        require(all(all(row.get(field) is None for field in columns) for row in current["rows"]),
-                "migration rewrote original operation/line history")
-        if failed and table == OPERATION_LOG:
-            # Model sync may drop a single-field custom unique index before
-            # the after_migrate hook reinstates it.
-            indexes.add("hp_v1_stock_operation_request")
-        extra_columns = tuple(f"`{field}` " for field in columns)
-        extra_indexes = tuple(prefix + f"`{name}`" for prefix in ("KEY ", "UNIQUE KEY ") for name in indexes)
-
-        def normalized(schema):
-            return tuple(line.strip().rstrip(",") for line in schema.splitlines()
-                         if not line.strip().startswith((*extra_columns, *extra_indexes)))
-
-        require(normalized(current["schema"]) == normalized(old["schema"]), "unexpected stock execution schema changes")
-        operations[table] = {
-            "schema": old["schema"],
-            "rows": [{key: value for key, value in row.items() if key not in columns} for row in current["rows"]],
-        }
-    require(dict(state, operations=operations) == baseline,
-            "V1-11 migration changed historical native or domain stock records")
+    operations = dict(state['operations'])
+    log, old = operations[OPERATION_LOG], baseline['operations'][OPERATION_LOG]
+    require('`quantity_effect` ' in log['schema'], 'missing explicit no-quantity effect schema')
+    require(all(row.get('quantity_effect') is None for row in log['rows']), 'migration rewrote historic logs')
+    normalized = lambda schema: tuple(line.strip().rstrip(',') for line in schema.splitlines()
+                                     if not line.strip().startswith('`quantity_effect` '))
+    require(normalized(log['schema']) == normalized(old['schema']), 'unexpected V1-12 stock log schema change')
+    operations[OPERATION_LOG] = dict(schema=old['schema'],rows=[{k:v for k,v in r.items() if k!='quantity_effect'} for r in log['rows']])
+    require(dict(state, operations=operations, inventory=baseline['inventory']) == baseline,
+            'V1-12 migration changed historical native or business quantity facts')
+    if not failed:
+        require(len(state['inventory'])==4 and len(state['inventory']['HP V1 Inventory Epoch']['rows'])==1
+                and bool(state['inventory']['HP V1 Inventory Version']['rows']), 'quantity version backfill missing')
 
 
 def recovery_point(backup):
@@ -222,6 +206,9 @@ def integration():
     inspect("issue-execution", SITE)
     inspect("transfer-dispatch", SITE)
     inspect("transfer-followup", SITE)
+    inspect("stock-count", SITE)
+    inspect("stock-count-extended", SITE)
+    inspect("stock-count-native", SITE)
     clean_with_stock = inspect("snapshot", SITE)
     repeat_migration(SITE, clean_with_stock)
     rehearse_upgrade(clean_with_stock)
@@ -254,7 +241,7 @@ def rehearse_upgrade(clean):
             baseline = Path(path) / "apps/haxpower_v1"
             deploy_app(fixture=baseline)
             version = run(PYTHON, "-c", "import haxpower_v1; print(haxpower_v1.__version__)", capture=True)
-            require(version.strip() == "0.11.0", "expected the merged V1-10 app")
+            require(version.strip() == "0.12.0", "expected the merged V1-11 app")
             site_command("migrate", target=UPGRADE)
             baseline_empty = inspect("snapshot", UPGRADE)
             verify_upgraded(baseline_empty, previous)
@@ -262,7 +249,7 @@ def rehearse_upgrade(clean):
             verify_warehouse_schema(baseline_empty)
             verify_access_schema(baseline_empty)
             verify_batch_schema(baseline_empty)
-            verify_stock_schema(baseline_empty, latest=False)
+            verify_stock_schema(baseline_empty)
             inspect("seed-catalog", UPGRADE)
             inspect("seed-skus", UPGRADE)
             inspect("verify-skus", UPGRADE)
@@ -275,14 +262,15 @@ def rehearse_upgrade(clean):
                     and len(seeded["warehouse"]["native_leaves"]) == 9
                     and len(seeded["access"]["assignments"]) == 2
                     and len(seeded["batch"]["rows"]) == len(seeded["batch"]["native"]) == 5,
-                    "unexpected merged V1-10 synthetic state")
+                    "unexpected merged V1-11 synthetic state")
             inspect("sku-concurrency", UPGRADE)
             inspect("stock-execution", UPGRADE)
             inspect("receipt-execution", UPGRADE)
             inspect("issue-execution", UPGRADE)
             inspect("seed-transfer-history", UPGRADE)
+            inspect("settle-transfer-history", UPGRADE)
             baseline_state = inspect("snapshot", UPGRADE)
-            record("merged V1-10 with native dispatches, ownership, authorized requests, receipts and issues", baseline_state)
+            record("merged V1-11 with native dispatch, receipt and return history, ownership, authorized requests, receipts and issues", baseline_state)
             rehearse_failure(baseline, baseline_state, lambda state: verify_transfer_upgrade(state, baseline_state, failed=True))
         finally:
             deploy_app()
@@ -295,7 +283,8 @@ def run_upgraded_rehearsal(clean, baseline_state):
     site_command("migrate", target=UPGRADE)
     upgraded = inspect("snapshot", UPGRADE)
     verify_transfer_upgrade(upgraded, baseline_state)
-    record("V1-11 upgraded from merged V1-10 with original dispatch and native facts preserved", upgraded)
+    record("V1-12 upgraded from merged V1-11; native facts preserved and versions backfilled", upgraded)
+    inspect("verify-inventory-versions", UPGRADE)
     inspect("verify-skus", UPGRADE)
     inspect("verify-access", UPGRADE)
     test_site(UPGRADE)
@@ -310,7 +299,11 @@ def run_upgraded_rehearsal(clean, baseline_state):
     inspect("receipt-execution", UPGRADE)
     inspect("issue-execution", UPGRADE)
     inspect("transfer-dispatch", UPGRADE)
-    inspect("settle-transfer-history", UPGRADE)
+    inspect("continue-v112-history", UPGRADE)
+    inspect("stock-count", UPGRADE)
+    inspect("stock-count-extended", UPGRADE)
+    inspect("stock-count-native", UPGRADE)
+    inspect("count-recovery-prepare", UPGRADE)
     populated = inspect("snapshot", UPGRADE)
     record("upgraded site with synthetic domain data and warehouse grants", populated)
     repeat_migration(UPGRADE, populated)
@@ -326,6 +319,7 @@ def run_upgraded_rehearsal(clean, baseline_state):
 
 
 def verify_recovered_stock(clean):
+    inspect("count-recovery-finish", UPGRADE)
     inspect("verify-skus", UPGRADE)
     inspect("verify-access", UPGRADE)
     inspect("verify-stock", UPGRADE)
@@ -334,7 +328,11 @@ def verify_recovered_stock(clean):
     inspect("receipt-execution", UPGRADE)
     inspect("issue-execution", UPGRADE)
     inspect("transfer-reconcile-history", UPGRADE)
-    inspect("resume-transfer-history", UPGRADE)
+    inspect("resume-v112-history", UPGRADE)
+    inspect("verify-inventory-versions", UPGRADE)
+    inspect("stock-count", UPGRADE)
+    inspect("stock-count-extended", UPGRADE)
+    inspect("stock-count-native", UPGRADE)
     inspect("transfer-dispatch", UPGRADE)
     check_installed(UPGRADE)
     require(inspect("snapshot", SITE) == clean, "upgrade rehearsal changed the clean-install site")
