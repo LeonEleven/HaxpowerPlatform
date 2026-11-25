@@ -655,8 +655,9 @@ def continue_v112_history(*, recovered=False):
             start,_,_=act(start,(0,start.lines[0].remaining_quantity),action=stock.RETURN)
             require(start.status==transit.CLOSED_RETURN,'restored transfer did not close')
         else:
-            start,_,_=act(start,(0,'1'))
-            require(start.lines[0].remaining_quantity=='3','upgraded transfer did not retain remaining transit')
+            require(Decimal(start.lines[0].remaining_quantity) == 4, 'V1-11 fixture lost its four units in transit')
+            start, _, _ = act(start, (0, '1'))
+            require(Decimal(start.lines[0].remaining_quantity) == 3, 'upgraded transfer did not retain remaining transit')
         replay=dto.DispatchResult(start.transfer_id,start.operation_id,transit.IN_TRANSIT,2)
         _assert_replay(lambda:service.dispatch(command),replay)
     print('V1-12 continued V1-11 partial transfer and replayed historical dispatch.',flush=True)
