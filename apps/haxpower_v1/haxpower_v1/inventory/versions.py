@@ -4,6 +4,7 @@ Every caller holds the shared stock guard. Native identity fingerprints detect
 out-of-band quantity edits while ignoring valuation/modified-only maintenance.
 """
 from collections import defaultdict
+from decimal import Decimal, localcontext
 from hashlib import sha256
 import json
 from uuid import uuid4
@@ -137,8 +138,14 @@ def facts():
             if item not in skus or leaf not in locations:
                 raise StockError('INVENTORY_NATIVE_HISTORY_INVALID')
             pairs[locations[leaf].company].add((item,leaf))
-    for company, selected in pairs.items():
-        read_source(company, selected, tuple(_load_sku(skus[item].name, locked=True) for item in sorted({i for i,_ in selected})))
+    # Reconciliation sums fixed-point database quantities. A caller's Decimal
+    # context must not round those totals or affect the inventory transaction.
+    with localcontext() as context:
+        context.prec = 64
+        for company, selected in pairs.items():
+            sku_ids = sorted({item for item, _ in selected})
+            managed_skus = tuple(_load_sku(skus[item].name, locked=True) for item in sku_ids)
+            read_source(company, selected, managed_skus)
     return {bucket:digest(sorted(entries)) for bucket,entries in result.items()}
 
 
@@ -184,7 +191,6 @@ def advance(before, links):
               AND s.docstatus=1 AND s.is_cancelled=0 FOR UPDATE''',
             (link.parent_type,link.parent_id,link.detail_id))
         for company,sku,location,kind,bid,qty in rows:
-            from decimal import Decimal
             if Decimal(qty):
                 touched.add(Bucket(company,sku,location,kind,bid if kind=='BATCH' else None))
     changed = {b for b in before.keys() | after.keys() if before.get(b) != after.get(b)}
