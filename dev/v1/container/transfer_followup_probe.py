@@ -643,3 +643,21 @@ def gl_candidate(sample):
         == {(Decimal("4.25"), Decimal(0)), (Decimal(0), Decimal("4.25"))} for rows in observed
     ), "native GL evidence did not reconcile at 4.25 for both directions")
     print("Native period/freeze rejection and both directions of 4.25 GL rollback passed.", flush=True)
+
+
+def continue_v112_history(*, recovered=False):
+    actor, command = _historical(2)
+    company = command.draft.company
+    with actor_session(actor, company), service.synthetic_candidate(company, limits=LIMITS):
+        start=service.get_dispatch(company,command.draft.transfer_id)
+        require(start.status==transit.PARTIAL,'V1-11 upgrade lost incomplete transfer')
+        if recovered:
+            start,_,_=act(start,(0,start.lines[0].remaining_quantity),action=stock.RETURN)
+            require(start.status==transit.CLOSED_RETURN,'restored transfer did not close')
+        else:
+            require(Decimal(start.lines[0].remaining_quantity) == 4, 'V1-11 fixture lost its four units in transit')
+            start, _, _ = act(start, (0, '1'))
+            require(Decimal(start.lines[0].remaining_quantity) == 3, 'upgraded transfer did not retain remaining transit')
+        replay=dto.DispatchResult(start.transfer_id,start.operation_id,transit.IN_TRANSIT,2)
+        _assert_replay(lambda:service.dispatch(command),replay)
+    print('V1-12 continued V1-11 partial transfer and replayed historical dispatch.',flush=True)

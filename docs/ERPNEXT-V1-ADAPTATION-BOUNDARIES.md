@@ -122,3 +122,22 @@ ERPNext 的 End Transit 计算仍会把已退数量显示为未接收量。员�
 保持封闭，受控接收在每个原行上执行领域剩余额度，再核对原生库存和累计实收。
 两种动作均核对逐行估值守恒及无 GL，B12 的正式估值策略待审定。
 受控原生事务按当前数据库重新读取永续库存开关，隔离 ERPNext 在同一 Bench 进程的旧值。
+
+## V1-12 Stock Reconciliation
+
+适配器针对锁定的 ERPNext v16.55.0 源码实现，使用受支持的 `Stock Reconciliation.insert()/submit()`、`use_serial_batch_fields=1` 和逐桶明确 Batch；NO_BATCH 仍映射为 SKU 专属系统 Batch。原生 `make_bundle_for_current_qty` 与 `get_sle_for_serialized_items` 可形成账面量的 Outward 和实盘量的 Inward。核验逐行所有有效 SLE/Bundle 净差，不能把整笔实盘量当增减；实盘零只应扣原账面量。无差异行不送原生引擎，无差异任务不伪造单据或 SLE。
+
+内部作用域只允许绑定的认证员工、公司、任务、原生父子行、Item、叶仓、Batch、方向及数量。原生估值、GL、关闭期间、冻结和数量校验继续执行；单一事务禁止提前提交、任意回调、即时队列与实时外部副作用。所有原生结果、任务、日志、幂等请求及版本一起提交。正式员工 HTTP 写入口继续关闭。
+
+[锁定原生源码](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/doctype/stock_reconciliation/stock_reconciliation.py) · [原生明细 schema](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/doctype/stock_reconciliation_item/stock_reconciliation_item.json)
+
+锁定版内部余额 helper 先做类型级 `Stock Reconciliation.write` 和 `Item.read` 检查。
+通过 Frappe 支持的 Custom DocPerm 为 `HP V1 Count` 提供这些最小技术权限，不授予原生
+create/submit/cancel/delete，也不授予 Stock User/Stock Manager。受管 Item 的详情/列表守卫、
+Stock Reconciliation 文档权限、生命周期守卫及 HTTP 白名单继续独立拒绝直接访问。
+合成 Count 身份的 REST、Desk 与 helper RPC 拒绝纳入 HTTP 矩阵。
+
+原生控制器在内存中直接比较 qty 和数字，因此适配边界先验证十进制到原生数值的字符串往返，
+再调用原生 API；领域快照、实盘、差异仍保存精确十进制文本，原生数量列为 DECIMAL，
+提交后逐桶复核无损结果。锁定版实盘零可能生成一个未提交的零 Inward Bundle；
+它必须关联本次明确零行、保持 docstatus=0 且无有效 SLE，不能被算成数量动作。

@@ -14,7 +14,8 @@
   "status",
   "result_revision",
   "notes",
-  "result_status"
+  "result_status",
+  "quantity_effect"
  ],
  "fields": [
   {
@@ -98,6 +99,13 @@
    "fieldtype": "Data",
    "read_only": 1,
    "length": 40
+  },
+  {
+   "fieldname": "quantity_effect",
+   "label": "Quantity Effect",
+   "fieldtype": "Data",
+   "length": 20,
+   "read_only": 1
   }
  ],
  "allow_rename": 0,

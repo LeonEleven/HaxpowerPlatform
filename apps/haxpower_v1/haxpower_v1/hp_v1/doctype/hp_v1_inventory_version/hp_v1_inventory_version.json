@@ -1,0 +1,77 @@
+{
+ "doctype": "DocType",
+ "name": "HP V1 Inventory Version",
+ "module": "HP V1",
+ "engine": "InnoDB",
+ "field_order": [
+  "generation",
+  "company",
+  "location_id",
+  "scope",
+  "sku_id",
+  "batch_key",
+  "counter",
+  "fact_digest"
+ ],
+ "fields": [
+  {
+   "fieldname": "generation",
+   "label": "Generation",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "company",
+   "label": "Company",
+   "fieldtype": "Link",
+   "read_only": 1,
+   "options": "Company"
+  },
+  {
+   "fieldname": "location_id",
+   "label": "Location Id",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "scope",
+   "label": "Scope",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "sku_id",
+   "label": "Sku Id",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "batch_key",
+   "label": "Batch Key",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "counter",
+   "label": "Counter",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "fact_digest",
+   "label": "Fact Digest",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "length": 140
+  }
+ ],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "permissions": []
+}

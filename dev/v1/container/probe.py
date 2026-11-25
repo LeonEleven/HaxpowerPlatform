@@ -71,13 +71,19 @@ def snapshot():
         from stock_probe import snapshot as stock_snapshot
 
         operations = stock_snapshot()
+    inventory = {}
+    for table in ('HP V1 Inventory Epoch','HP V1 Inventory Version','HP V1 Stock Count','HP V1 Stock Count Line'):
+        if frappe.db.table_exists(table):
+            inventory[table] = dict(schema=frappe.db.sql(f'SHOW CREATE TABLE `tab{table}`')[0][1],
+                                    rows=frappe.get_all(table,fields=['*'],order_by='name'))
     posted = {table: frappe.get_all(table, fields=["*"], order_by="name") for table in (
         "Stock Entry", "Stock Entry Detail", "Serial and Batch Bundle", "Serial and Batch Entry",
         "Stock Ledger Entry", "Bin", "GL Entry", "Payment Ledger Entry", "Repost Item Valuation",
+        "Stock Reconciliation", "Stock Reconciliation Item",
     )}
     return {"access": access, "batch": batch, "operations": operations, "schema": schema, "rows": rows,
             "patches": logs, "catalog": catalog, "sku": sku,
-            "warehouse": warehouse, "posted": posted}
+            "warehouse": warehouse, "posted": posted, "inventory": inventory}
 
 
 def main(action, site):
@@ -162,6 +168,38 @@ def main(action, site):
                 run(site)
             else:
                 settle_history(recovered=action == "resume-transfer-history")
+        elif action in {"continue-v112-history", "resume-v112-history"}:
+            from transfer_followup_probe import continue_v112_history
+
+            continue_v112_history(recovered=action == 'resume-v112-history')
+        elif action == "verify-inventory-versions":
+            from haxpower_v1.inventory import versions
+            from haxpower_v1.inventory.guard import lock_stock_writes
+
+            lock_stock_writes()
+            history=versions.verify()
+            require(bool(history), 'upgrade did not backfill any native quantity history')
+            print(f'Inventory epoch ready: {len(history)} historical buckets, including zero/transit; native facts verified.')
+        elif action == "version-backfill-fault":
+            from count_probe import backfill_fault
+
+            backfill_fault()
+        elif action in {'count-recovery-prepare','count-recovery-finish'}:
+            from count_probe import recovery_prepare, recovery_finish
+
+            (recovery_prepare if action=='count-recovery-prepare' else recovery_finish)()
+        elif action == "stock-count-native":
+            from count_probe import native_boundaries
+
+            native_boundaries(site)
+        elif action == "stock-count-extended":
+            from count_probe import extended
+
+            extended(site)
+        elif action == "stock-count":
+            from count_probe import run
+
+            run(site)
         elif action == "access-http":
             from access_probe import verify_http
 

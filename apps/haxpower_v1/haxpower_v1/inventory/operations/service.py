@@ -58,6 +58,10 @@ class Action:
     prepare_continuation: Callable[..., Continuation] | None = None
     verify_history: Callable | None = None
     require_reason: bool = False
+    load_document: Callable | None = None
+    prepare_plan: Callable | None = None
+    native_line_ids: Callable | None = None
+    allow_empty_lines: bool = False
 
 
 def _digest(value):
@@ -92,7 +96,7 @@ def _shape(command, action):
         raise StockError("STOCK_INVALID_REQUEST_KEY")
     if type(command.expected_revision) is not int or not 1 <= command.expected_revision < 2_147_483_647:
         raise StockError("STOCK_INVALID_REVISION")
-    if not isinstance(command.lines, tuple) or not command.lines:
+    if not isinstance(command.lines, tuple) or (not command.lines and not action.allow_empty_lines):
         raise StockError("STOCK_LINES_REQUIRED")
     ids, numbers = set(), set()
     for line in command.lines:
@@ -145,6 +149,8 @@ def _request_identity(command, actor, action):
 def payload_digest(command, actor, action_name):
     payload = asdict(command)
     del payload["idempotency_key"]
+    if payload["snapshot_id"] is None:
+        del payload["snapshot_id"]
     if payload["notes"] is None:
         del payload["notes"]
     for line in payload["lines"]:
@@ -207,7 +213,8 @@ def _original(command):
 
 
 def _check_links(plan, action, links):
-    line_ids = {line.line_id for line in plan.command.lines}
+    line_ids = (action.native_line_ids(plan) if action.native_line_ids
+                else {line.line_id for line in plan.command.lines})
     covered, seen = set(), set()
     for link in links:
         field = action.detail_fields.get((link.parent_type, link.detail_type))
@@ -270,7 +277,7 @@ def _stage(database, command, action, *, recovery):
     document_type = action.document_type or action.name
     if request:
         # Authorize the stored object even if the retry changed its target.
-        document, stored_lines = _lock_document(command.company, request.document_id, document_type)
+        document, stored_lines = (action.load_document or _lock_document)(command.company, request.document_id, document_type)
         _authorize(command.company, stored_lines, action)
         digest = payload_digest(command, actor, action.name)
         result = _replay(request, document, digest, action, actor, command.expected_revision)
@@ -278,7 +285,7 @@ def _stage(database, command, action, *, recovery):
             action.verify_history(document, stored_lines)
         return result, False
 
-    document, stored_lines = _lock_document(command.company, command.document_id, document_type)
+    document, stored_lines = (action.load_document or _lock_document)(command.company, command.document_id, document_type)
     locations = _authorize(command.company, stored_lines, action)
     if recovery:
         raise StockError("STOCK_RETRY_REQUIRED")
@@ -303,6 +310,7 @@ def _stage(database, command, action, *, recovery):
             replace(line, quantity="") for line in input_lines
         ):
             raise StockError("STOCK_DOCUMENT_PAYLOAD_MISMATCH")
+    preparation = action.prepare_plan(command, document, stored_lines, locations) if action.prepare_plan else None
     skus = _resources(command, action)
     if not continuation and (
         command.lines != input_lines
@@ -310,6 +318,8 @@ def _stage(database, command, action, *, recovery):
     ):
         raise StockError("STOCK_DOCUMENT_PAYLOAD_MISMATCH")
 
+    from .. import versions
+    before_versions = versions.verify()
     with adapter_transaction(database, native_orm=action.native_orm):
         resolved = action.resolve_batches(command, skus) if action.resolve_batches else command
         if action.bind_batches_on_draft and any(
@@ -319,7 +329,7 @@ def _stage(database, command, action, *, recovery):
             raise StockError("BATCH_MAPPING_UNAVAILABLE")
         plan = Plan(resolved, sum_demands(command.company, resolved.lines, location_field="source"),
                     sum_demands(command.company, resolved.lines, location_field="target"), locations, skus,
-                    continuation.context if continuation else None)
+                    continuation.context if continuation else preparation)
         links = action.apply(plan)
         _check_links(plan, action, links)
 
@@ -328,13 +338,15 @@ def _stage(database, command, action, *, recovery):
     store.insert(store.LOG, name=result.operation_id, action=action.name, document_id=document.name,
                  request_id=request_id, actor=actor, effect_key=request_id if continuation else "APPLY",
                  reason=command.reason, notes=command.notes, original_operation=command.original_operation,
-                 status="Effective", result_revision=result.revision, result_status=status)
+                 status="Effective", result_revision=result.revision, result_status=status,
+                 quantity_effect=("None" if not links else "Native"))
     for link in links:
         store.insert(store.LINK, operation_id=result.operation_id, **asdict(link))
     store.update_document(document, result)
     store.complete_request(request_id, result)
     if action.record_effect:
         action.record_effect(plan, result, links)
+    versions.advance(before_versions, links)
     return result, True
 
 

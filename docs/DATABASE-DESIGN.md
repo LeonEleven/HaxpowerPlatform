@@ -208,3 +208,9 @@ V1-09 沿用 V1-08 表结构。升级验收比较应用迁移前后的合成历�
 `(document_id, result_revision)` 和请求唯一约束防止产生重复效果。业务单在当前行锁下按原
 状态和版本条件推进，`effective_operation` 始终保留发出操作。日志保存每次操作的历史结果状态
 和版本。V1-10 发出日志的历史状态从动作推导为 In Transit，安装和迁移保留已有日志与请求。
+
+### V1-12 库存版本与盘点持久化
+
+`HP V1 Inventory Epoch` 是受保护的初始化代次。`HP V1 Inventory Version` 保存 Company、Location、scope、SKU、非空批次身份键、generation、精确整数文本 counter 和数量历史身份摘要，不存库存余额。LOCATION/SKU/BUCKET 分开计数，NO_BATCH 使用非空键；归零桶保留历史。
+
+`HP V1 Stock Count` 与同 ID 的 Stock Document 组合成任务头，保留服务端截止、范围、快照身份、代次、范围版本及前后重盘引用。`HP V1 Stock Count Line` 保存稳定行 ID、明确批次、账面/实盘/差异的无损十进制文本、桶版本、确认标记、发现标记、人员/时间及备注。未确认数量为 NULL；实盘 0 是独立的显式确认。任务内 bucket_key 唯一，避免 NULL 唯一索引歧义。完成复用请求和日志，quantity_effect=None 专用于显式无数量完成，不伪造原生引用。系统记录无普通 CRUD 权限。

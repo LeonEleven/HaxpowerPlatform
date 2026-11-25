@@ -159,7 +159,7 @@ def verify_http(site):
     require(stock_document, "missing committed synthetic stock document for HTTP verification")
     all_user = synthetic_user(run_id, "all", Operation.WAREHOUSE_READ, Operation.INVENTORY_READ)
     selected = synthetic_user(run_id, "selected", Operation.WAREHOUSE_READ, Operation.TRANSFER, Operation.PRODUCT_READ)
-    operator = synthetic_user(run_id, "operator", Operation.WAREHOUSE_MAINTAIN, Operation.RECEIVE, Operation.ISSUE)
+    operator = synthetic_user(run_id, "operator", Operation.WAREHOUSE_MAINTAIN, Operation.RECEIVE, Operation.ISSUE, Operation.COUNT)
     approver = synthetic_user(run_id, "approver", Operation.APPROVE, Operation.WAREHOUSE_READ)
     empty = synthetic_user(run_id, "empty", Operation.WAREHOUSE_READ)
     absent = synthetic_user(run_id, "absent", Operation.WAREHOUSE_READ)
@@ -217,6 +217,11 @@ def verify_http(site):
         require(all(set(row) == {"id", "code", "display_name"} for row in response["rows"]),
                 "warehouse projection leaked internal fields")
         return response["total"]
+
+    def inventory_snapshot():
+        return {table:frappe.get_all(table,fields=['*'],order_by='name') for table in (
+            'HP V1 Inventory Epoch','HP V1 Inventory Version','HP V1 Stock Count','HP V1 Stock Count Line')
+            if frappe.db.table_exists(table)}
 
     def denial_matrix(session, selected_session, operator_session):
         escaped_leaf = quote(leaf, safe="")
@@ -338,6 +343,16 @@ def verify_http(site):
             ("internal transfer receive", "POST", "/api/method/haxpower_v1.inventory.transfer.service.receive", {}),
             ("internal transit return", "POST", "/api/method/haxpower_v1.inventory.transfer.service.return_remaining", {}),
             ("internal transfer detail", "POST", "/api/method/haxpower_v1.inventory.transfer.service.get_dispatch", {}),
+            ("count task list", "GET", "/api/resource/HP%20V1%20Stock%20Count", None),
+            ("count line create", "POST", "/api/resource/HP%20V1%20Stock%20Count%20Line", {}),
+            ("inventory epoch create", "POST", "/api/resource/HP%20V1%20Inventory%20Epoch", {}),
+            ("inventory version create", "POST", "/api/v2/document/HP%20V1%20Inventory%20Version", {}),
+            *((f"internal count {method}", "POST", f"/api/method/haxpower_v1.inventory.stock_count.service.{method}", {})
+              for method in ('create','get','record','discover','recount','complete')),
+            ("native count helper", "POST", "/api/method/erpnext.stock.doctype.stock_reconciliation.stock_reconciliation.get_stock_balance_for", {}),
+            ("native count REST create", "POST", "/api/resource/Stock%20Reconciliation", {}),
+            ("native count Desk submit", "POST", "/api/method/frappe.desk.form.save.savedocs",
+             {"doc": frappe.as_json({"doctype":"Stock Reconciliation","company":company}), "action":"Submit"}),
             ("internal transit ownership", "GET", "/api/resource/HP%20V1%20Transit%20Ownership", {}),
             ("native End Transit mapper", "POST",
              "/api/method/erpnext.stock.doctype.stock_entry.stock_entry.make_stock_in_entry", {}),
@@ -392,10 +407,10 @@ def verify_http(site):
             business(all_session, "warehouse role cannot view product", "get_sku", sku_id=sku.name, status=403)
 
             # Compare all mapped domain/native rows and raw stock counts across denied requests.
-            before = domain_snapshot(), stock_counts(), frappe.db.count("Version"), stock_snapshot()
+            before = domain_snapshot(), stock_counts(), frappe.db.count("Version"), stock_snapshot(), inventory_snapshot()
             denial_matrix(native_session, all_session, operator_session)
             frappe.db.rollback()
-            require((domain_snapshot(), stock_counts(), frappe.db.count("Version"), stock_snapshot()) == before,
+            require((domain_snapshot(), stock_counts(), frappe.db.count("Version"), stock_snapshot(), inventory_snapshot()) == before,
                     "denied requests left a persistent side effect")
 
             for prefix in ("/api/resource", "/api/v2/document"):

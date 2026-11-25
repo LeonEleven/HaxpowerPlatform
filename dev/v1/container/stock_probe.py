@@ -516,7 +516,9 @@ def verify_persisted():
     require(requests and len(requests) == len(state[store.LOG]["rows"])
             and len([link for link in links if link.detail_type == store.SYNTHETIC_DETAIL])
             == len(state[store.SYNTHETIC_DETAIL]["rows"])
-            and {link.operation_id for link in links} == {req.result_operation for req in requests},
+            and ({link.operation_id for link in links} | {log.name for log in state[store.LOG]['rows']
+                 if log.action=='Stock Count' and log.get('quantity_effect')=='None'})
+            == {req.result_operation for req in requests},
             "persisted stock execution records have missing references")
     history = {}
     for req in requests:
@@ -534,11 +536,19 @@ def verify_persisted():
                     and log.effect_key == req.name and log.get("result_status"),
                     "persisted transfer follow-up lost effect or original dispatch identity")
         else:
-            require(log.effect_key == "APPLY" and log.result_revision == 2, "original operation identity drift")
+            require(log.effect_key == "APPLY" and (log.result_revision == 2 or (
+                log.action=='Stock Count' and log.result_revision==document.revision and document.status=='Completed')),
+                "original operation identity drift")
         history.setdefault(document.name, []).append(log)
     for identity, operations in history.items():
         document, = rows(state, store.DOCUMENT, name=identity)
         operations.sort(key=lambda log: log.result_revision)
+        if document.document_type=='Stock Count':
+            require(len(operations)==1 and document.status=='Completed'
+                    and operations[0].name==document.effective_operation
+                    and operations[0].result_revision==document.revision,
+                    'persisted count completion lost its edited task revision')
+            continue
         require([log.result_revision for log in operations] == list(range(2, document.revision + 1))
                 and operations[0].name == document.effective_operation,
                 "persisted operation history is not continuous")

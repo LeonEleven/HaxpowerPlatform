@@ -205,3 +205,11 @@ SKU、单位、批次、库位和原生记录由原发出证据确定。输入�
 摘要涵盖动作、认证人、公司、单据、期望版本、按 ID 排序的逐行规范数量、原因和备注。
 当前双侧权限通过后，同键同负载返回本次历史结果，后续版本推进或移库关闭时依然可重放。
 同键异负载返回 `STOCK_IDEMPOTENCY_CONFLICT`。正式员工 HTTP 数量入口仍关闭。
+
+## V1-12 内部盘点契约
+
+`inventory.stock_count.service` 提供 `create(CreateCount)`、`get(company, task_id)`、`record(company, task_id, revision, tuple[Actual])`、`discover(company, task_id, revision, sku_id, batch)`、`recount(company, task_id, revision, reason)` 与 `complete(CompleteCount)`。均重验 COUNT 和单个物理库位仓库范围。尚无员工 HTTP 写入口。
+
+create 只接收范围选择与备注；快照数量、时间、代次和版本由服务器生成。LOCATION 不接受 SKU/批次，SKU 不接受批次，BUCKET 要求明确选择。record 只接受稳定行 ID、十进制实盘字符串及备注；NULL 不代表零。discover 不扩大范围，不创建 SKU；复用 V1-06 受控批次服务。recount 追加任务并保留旧数据，不复制实盘。
+
+complete 携带任务投影（含期望 revision、原快照身份和稳定行）、幂等键及必要原因。规范摘要涵盖当前主体、公司、范围、快照、代次、逐行确认/发现身份与规范数量。返回稳定单据 ID、完成操作、状态 Completed 和新 revision。范围、桶、代次改变分别报 COUNT_SCOPE_CHANGED / COUNT_BUCKET_CHANGED / COUNT_GENERATION_CHANGED；实盘遗漏报 COUNT_ACTUAL_INCOMPLETE。失败无数量或版本残留；历史成功重放先重新授权。
