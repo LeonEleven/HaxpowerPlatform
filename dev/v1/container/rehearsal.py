@@ -128,10 +128,21 @@ def verify_transfer_upgrade(state, baseline, *, failed=False):
     require(all(row.get('quantity_effect') is None for row in log['rows']), 'migration rewrote historic logs')
     # Model sync may remove a single-column custom unique index before the
     # after_migrate hook restores it. The injected post-sync failure is earlier.
-    ignored=('`quantity_effect` ',) + (('UNIQUE KEY `hp_v1_stock_operation_request`',) if failed else ())
-    normalized = lambda schema: tuple(line.strip().rstrip(',') for line in schema.splitlines()
-                                     if not line.strip().startswith(ignored))
-    require(normalized(log['schema']) == normalized(old['schema']), 'unexpected V1-12 stock log schema change')
+    ignored = ('`quantity_effect` ',) + (('UNIQUE KEY `hp_v1_stock_operation_request`',) if failed else ())
+
+    def normalized(schema):
+        lines=[line.strip().rstrip(',') for line in schema.splitlines()
+               if not line.strip().startswith(ignored)]
+        # Recreated indexes can move in SHOW CREATE TABLE without changing
+        # columns or constraints. Preserve columns, compare indexes as a set.
+        indexes=tuple(sorted(line for line in lines if line.startswith(('PRIMARY KEY','KEY ','UNIQUE KEY','CONSTRAINT '))))
+        structure=tuple(line for line in lines if not line.startswith(('PRIMARY KEY','KEY ','UNIQUE KEY','CONSTRAINT ')))
+        return structure,indexes
+    current_schema, prior_schema = normalized(log['schema']), normalized(old['schema'])
+    if current_schema != prior_schema:
+        missing = sorted(set(prior_schema[0] + prior_schema[1]) - set(current_schema[0] + current_schema[1]))
+        added = sorted(set(current_schema[0] + current_schema[1]) - set(prior_schema[0] + prior_schema[1]))
+        raise ValueError(f'unexpected V1-12 stock log schema change: missing={missing}, added={added}')
     operations[OPERATION_LOG] = dict(schema=old['schema'],rows=[{k:v for k,v in r.items() if k!='quantity_effect'} for r in log['rows']])
     require(dict(state, operations=operations, inventory=baseline['inventory']) == baseline,
             'V1-12 migration changed historical native or business quantity facts')
