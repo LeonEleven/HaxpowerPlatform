@@ -335,8 +335,9 @@ def run_upgraded_rehearsal(clean, baseline_state):
     inspect("transfer-dispatch", UPGRADE)
     inspect("continue-v112-history", UPGRADE)
     inspect("stock-count", UPGRADE)
-    inspect("stock-count-extended", UPGRADE)
     inspect("stock-count-native", UPGRADE)
+    # The extended probe rotates the site's generation. Run it after the
+    # restored V1-12 Draft has proved continuity with its original snapshot.
     inspect("approval-recovery-prepare", UPGRADE)
     populated = inspect("snapshot", UPGRADE)
     record("upgraded site with synthetic domain data and warehouse grants", populated)
