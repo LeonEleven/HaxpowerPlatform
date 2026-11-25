@@ -105,6 +105,7 @@ def facts():
     for parent,name,batch,qty,status,cancelled in frappe.db.sql('''SELECT parent,name,batch_no,CAST(qty AS CHAR),
         docstatus,is_cancelled FROM `tabSerial and Batch Entry` ORDER BY name FOR UPDATE'''):
         parts_by_bundle[parent].append((name,batch,qty,status,cancelled))
+    seen_native_links = set()
     for row in rows:
         if row.item_code not in skus and row.warehouse not in locations:
             continue
@@ -115,6 +116,7 @@ def facts():
         if (link_counts[row.voucher_type,row.voucher_no,row.voucher_detail_no,row.company] != 1
                 or parent_status.get((row.voucher_type,row.voucher_no)) != 1):
             raise StockError('INVENTORY_NATIVE_HISTORY_INVALID')
+        seen_native_links.add((row.voucher_type,row.voucher_no,row.voucher_detail_no,row.company))
         parts = parts_by_bundle.get(row.bundle, ())
         if not parts:
             raise StockError('INVENTORY_NATIVE_HISTORY_INVALID')
@@ -127,6 +129,8 @@ def facts():
             result[bucket].append((row.name, row.quantity, row.bundle, row.voucher_type,row.voucher_no,
                                    row.voucher_detail_no,name,batch,qty))
         pairs[row.company].add((row.item_code, row.warehouse))
+    if seen_native_links != {key for key in link_counts if key[0] in ('Stock Entry','Stock Reconciliation')}:
+        raise StockError('INVENTORY_NATIVE_HISTORY_INVALID')
     # A stray Bin or stale Batch is checked even in the absence of a live SLE.
     for item, leaf in frappe.db.sql('SELECT item_code,warehouse FROM `tabBin` FOR UPDATE'):
         if item in skus or leaf in locations:
@@ -242,11 +246,39 @@ def _rotate_generation_locked(reason):
     if getattr(frappe.local, 'request', None) is not None or not isinstance(reason, str) or not reason.strip():
         raise StockError('INVENTORY_REBASE_UNAUTHORIZED')
     from ..access import policy
-    policy.require_operation(policy.Operation.SYSTEM_MAINTAIN, locked=True)
     lock_stock_writes()
+    policy.require_operation(policy.Operation.SYSTEM_MAINTAIN, locked=True)
     verify()
     generation = uuid4().hex
-    frappe.db.sql(f'UPDATE `tab{EPOCH}` SET generation=%s,baseline_at=%s,reason=%s WHERE name=%s',
-                  (generation, now_datetime(), reason, 'inventory'))
+    frappe.db.sql(f'UPDATE `tab{EPOCH}` SET generation=%s,baseline_at=%s,reason=%s,modified=%s,modified_by=%s WHERE name=%s',
+                  (generation, now_datetime(), reason, now_datetime(), frappe.session.user, 'inventory'))
     frappe.db.sql(f'UPDATE `tab{VERSION}` SET generation=%s', (generation,))
+    return generation
+
+
+def _rebaseline_generation_locked(reason):
+    """Explicit repair seam for lost version continuity, never called by migrate.
+
+    Requires separately authorized maintenance. Reconcile native facts and
+    bidirectional operation links before replacing the version baseline in a
+    new generation; old count snapshots can never become valid in this epoch.
+    The caller owns the single transaction/COMMIT and operational release.
+    """
+    from ..access import policy
+    if getattr(frappe.local, 'request', None) is not None or not isinstance(reason, str) or not reason.strip():
+        raise StockError('INVENTORY_REBASE_UNAUTHORIZED')
+    lock_stock_writes()
+    policy.require_operation(policy.Operation.SYSTEM_MAINTAIN, locked=True)
+    baseline = facts()
+    prior = stock.current(EPOCH, 'inventory', ('generation', 'state'))
+    if not prior:
+        raise StockError('INVENTORY_VERSION_NOT_READY')
+    # Historical quantity buckets are in baseline even when currently zero.
+    # Counters restart only in this explicit new generation, never on migrate.
+    frappe.db.sql(f'DELETE FROM `tab{VERSION}`')
+    generation = uuid4().hex
+    frappe.db.sql(f'UPDATE `tab{EPOCH}` SET generation=%s,state=%s,baseline_at=%s,reason=%s,modified=%s,modified_by=%s WHERE name=%s',
+                  (generation, 'Ready', now_datetime(), reason, now_datetime(), frappe.session.user, 'inventory'))
+    _write(baseline, baseline, increment=False)
+    verify()
     return generation

@@ -225,9 +225,9 @@ def run(site):
         first=create(company,source,sku=sku);second=create(company,source,sku=sku)
         first=actual(first,{first.lines[0].line_id:'4'});second=actual(second,{second.lines[0].line_id:'3'})
         compete(site,actor,company,first,second)
+        same_task_races(site,actor,company,source,sku)
         fault_task=create(company,source,Scope.SKU,sku)
         fault_task=actual(fault_task,{r.line_id:format(Decimal(r.snapshot_quantity)+1,'f') for r in fault_task.lines})
-        same_task_races(site,actor,company,source,sku)
         # Real native posting runs; inject failure only at each persistence boundary.
         original_insert=store.insert
         original_write=versions._write
@@ -387,6 +387,21 @@ def extended(site):
         reopened=counts.recount(company,old.task_id,old.revision,'Synthetic generation changed')
         reopened=actual(reopened)
         before=fresh();verify_effect(reopened,finish(reopened),before)
+        discontinuous=actual(create(company,source,sku=sku))
+        with connection(read_committed=True) as db:
+            lock_stock_writes(company)
+            native_before=versions.facts()
+            missing=versions.identity(company,source,'BUCKET',sku,'NO_BATCH')
+            db.sql(f'DELETE FROM `tab{versions.VERSION}` WHERE name=%s',(missing,))
+            try:versions.verify()
+            except StockError as error:require(error.code in ('INVENTORY_QUANTITY_HISTORY_CHANGED','INVENTORY_VERSION_NOT_READY'),'unexpected continuity refusal')
+            else:raise RuntimeError('lost counter did not stop inventory execution')
+            versions._rebaseline_generation_locked('Synthetic lost-counter continuity repair')
+            require(versions.verify()==native_before,'new generation repair changed native quantities')
+            _commit(db)
+        reject('COUNT_GENERATION_CHANGED',lambda:finish(discontinuous))
+        repaired=actual(counts.recount(company,discontinuous.task_id,discontinuous.revision,'Synthetic rebaseline requires new actuals'))
+        before=fresh();verify_effect(repaired,finish(repaired),before)
         # Concurrent count versus each write uses two independent MariaDB
         # transactions and a third verifier. Both legal serial orders are checked.
         for kind in ('receipt','issue','dispatch','receive','return','new-bucket'):
