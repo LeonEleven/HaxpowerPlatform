@@ -18,7 +18,7 @@ from ..guard import lock_stock_writes
 from ..operations import persistence as store
 from ..operations.dto import Command, Line, LineQuantity, QuantitySign, StockError
 from ..operations.quantity import quantity_text
-from ..operations.service import Action, Continuation, _create_draft, _execute, _lock_document
+from ..operations.service import Action, Continuation, _create_draft, _execute, _lock_document, _revise_draft
 from ..operations.transaction import connection
 from ..posting import batch_input, require_fixture, require_native_precision, selection
 from . import transit
@@ -95,17 +95,41 @@ def create_draft(payload: TransferDraftInput) -> TransferDraft:
     return TransferDraft(draft.company, draft.document_id, draft.expected_revision, public, draft.reason, payload.notes)
 
 
+def revise_draft(draft: TransferDraft) -> TransferDraft:
+    candidate = _authorize(draft.company)
+    ids = tuple(line.transfer_line_id or uuid4().hex for line in draft.lines)
+    new_ids = {id_ for line, id_ in zip(draft.lines, ids, strict=True) if not line.transfer_line_id}
+    lines = tuple(_line(line, number, id_) for number, (line, id_) in enumerate(
+        zip(draft.lines, ids, strict=True), 1,
+    ))
+    command = Command(draft.company, draft.transfer_id, draft.revision, uuid4().hex, lines, draft.reason)
+    updated = _revise_draft(command, _action(candidate), new_line_ids=new_ids, notes=draft.notes)
+    return replace(draft, revision=updated.expected_revision, lines=tuple(replace(line, transfer_line_id=id_) for line, id_ in zip(draft.lines, ids, strict=True)))
+
+
+def _dispatch_command(payload):
+    draft = payload.draft
+    candidate = _authorize(draft.company)
+    lines = tuple(_line(line, number, line.transfer_line_id) for number, line in enumerate(draft.lines, 1))
+    command = Command(draft.company, draft.transfer_id, draft.revision, payload.idempotency_key, lines,
+                      draft.reason, notes=draft.notes)
+    return command, _action(candidate)
+
+
+def submit(payload: DispatchTransfer):
+    from ...approval.service import submit_transfer
+
+    return submit_transfer(*_dispatch_command(payload))
+
+
 def dispatch(payload: DispatchTransfer) -> DispatchResult:
     return _dispatch(payload)
 
 
 def _dispatch(payload, *, before_guard=None, commit=None):
-    draft = payload.draft
-    candidate = _authorize(draft.company)
-    lines = tuple(_line(line, number, line.transfer_line_id) for number, line in enumerate(draft.lines, 1))
-    command = Command(draft.company, draft.transfer_id, draft.revision, payload.idempotency_key, lines, draft.reason, notes=draft.notes)
+    command, action = _dispatch_command(payload)
     try:
-        result = _execute(command, _action(candidate), before_guard=before_guard, commit=commit)
+        result = _execute(command, action, before_guard=before_guard, commit=commit)
     except StockError as error:
         if error.code == "STOCK_ADAPTER_SIDE_EFFECT":
             frappe.logger("haxpower_v1", allow_site=True).warning(

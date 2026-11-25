@@ -1,7 +1,7 @@
 """Non-freezing stock counts, trusted snapshots and an approval execution seam.
 
 Not whitelisted: employee stock writes remain disabled pending B01/B03/B12.
-V1-13 must call complete at actual execution, never at approval submission.
+Completion submits the confirmed snapshot through the inventory approval policy.
 """
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -111,7 +111,8 @@ def _rows(task_id):
 def _head(company, task_id):
     _id(task_id)
     document = store.current(store.DOCUMENT,task_id,
-        ('name','company','document_type','status','revision','effective_operation','notes'))
+        ('name','company','document_type','status','revision','effective_operation','notes',
+         'reason','owner','approval_submission'))
     task = store.current(versions.TASK,task_id,('*',))
     if not document or not task or (document.company,document.document_type,task.company) != (company,ACTION,company):
         policy.deny()
@@ -135,7 +136,7 @@ def _view(document, task, rows):
     lines = tuple(CountLine(r.name,r.line_no,r.sku_id,r.location_id,r.batch_kind,r.batch_id or None,
         r.batch_no or None,r.uom,r.snapshot_quantity,r.actual_quantity,r.difference_quantity,r.bucket_version,
         bool(r.confirmed),bool(r.discovered),r.counted_by,str(r.counted_at) if r.counted_at else None,r.notes or '') for r in rows)
-    stale = _stale(task,rows) if document.status=='Draft' else None
+    stale = _stale(task,rows) if document.status in ('Draft', 'Rejected', 'Pending Approval') else None
     return CountTask(task.company,task.name,task.location_id,task.scope,task.sku_id or None,
         task.batch_kind or None,task.batch_id or None,task.snapshot_id,str(task.snapshot_at),task.generation,
         task.scope_version,document.revision,document.status,stale,task.original_task or None,
@@ -223,7 +224,7 @@ def get(company, task_id):
 
 def _editable(company, task_id, revision):
     document,task = _head(company,task_id)
-    if document.status != 'Draft' or task.recount_task:
+    if document.status not in ('Draft', 'Rejected') or task.recount_task:
         raise StockError('COUNT_NOT_EDITABLE')
     if type(revision) is not int or document.revision != revision:
         raise StockError('STOCK_REVISION_CONFLICT')
@@ -299,7 +300,7 @@ def recount(company, task_id, revision, reason):
     with connection(read_committed=True) as db:
         lock_stock_writes(company)
         document,task = _head(company,task_id)
-        if document.status!='Draft' or task.recount_task or document.revision!=revision:
+        if document.status not in ('Draft', 'Rejected') or task.recount_task or document.revision!=revision:
             raise StockError('COUNT_NOT_EDITABLE')
         batch = ({'mode':task.batch_kind,'batchNo':task.batch_no} if task.batch_kind=='BATCH'
                  else {'mode':'NO_BATCH'}) if task.scope==Scope.BUCKET else None
@@ -325,6 +326,18 @@ def _snapshot_identity(task):
     return versions.digest((task.snapshot_id,task.generation,task.scope_version,task.scope,task.location_id,
         task.sku_id,task.batch_kind,task.batch_id,
         [(r.line_id,r.snapshot_quantity,r.bucket_version,r.discovered,r.confirmed) for r in sorted(task.lines,key=lambda r:r.line_id)]))
+
+
+def _approval_snapshot(task_id):
+    fields = ('snapshot_id', 'generation', 'scope_version', 'scope', 'location_id', 'sku_id',
+              'batch_kind', 'batch_id', 'snapshot_at')
+    task = store.current(versions.TASK, task_id, fields)
+    if not task:
+        raise StockError('COUNT_SNAPSHOT_MISMATCH')
+    line_fields = ('name', 'sku_id', 'location_id', 'batch_kind', 'batch_id', 'snapshot_quantity',
+                   'bucket_version', 'confirmed', 'discovered', 'actual_quantity', 'difference_quantity')
+    return {**task, 'snapshot_at': str(task.snapshot_at),
+            'lines': [{field: row[field] for field in line_fields} for row in _rows(task_id)]}
 
 
 def _prepare(command, document, stored_lines, locations):

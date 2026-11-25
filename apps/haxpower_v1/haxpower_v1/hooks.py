@@ -117,3 +117,5 @@ after_install.append("haxpower_v1.inventory.versions.ensure_schema")
 
 after_install.append("haxpower_v1.adapters.erpnext.stock_count.ensure_schema")
 has_permission["Stock Reconciliation"] = "haxpower_v1.adapters.erpnext.stock_count.permission"
+
+after_install.append("haxpower_v1.approval.persistence.ensure_schema")

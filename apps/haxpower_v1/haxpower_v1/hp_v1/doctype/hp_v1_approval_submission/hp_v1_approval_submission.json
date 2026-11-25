@@ -1,0 +1,84 @@
+{
+ "doctype": "DocType",
+ "name": "HP V1 Approval Submission",
+ "module": "HP V1",
+ "engine": "InnoDB",
+ "field_order": [
+  "company",
+  "document_id",
+  "document_type",
+  "business_revision",
+  "creator",
+  "submitter",
+  "configuration_revision",
+  "approval_required",
+  "payload",
+  "payload_digest"
+ ],
+ "fields": [
+  {
+   "fieldname": "company",
+   "label": "Company",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "document_id",
+   "label": "Document Id",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "document_type",
+   "label": "Document Type",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "business_revision",
+   "label": "Business Revision",
+   "fieldtype": "Int",
+   "read_only": 1
+  },
+  {
+   "fieldname": "creator",
+   "label": "Creator",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "submitter",
+   "label": "Submitter",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "configuration_revision",
+   "label": "Configuration Revision",
+   "fieldtype": "Int",
+   "read_only": 1
+  },
+  {
+   "fieldname": "approval_required",
+   "label": "Approval Required",
+   "fieldtype": "Check",
+   "read_only": 1
+  },
+  {
+   "fieldname": "payload",
+   "label": "Payload",
+   "fieldtype": "Long Text",
+   "read_only": 1
+  },
+  {
+   "fieldname": "payload_digest",
+   "label": "Payload Digest",
+   "fieldtype": "Data",
+   "read_only": 1
+  }
+ ],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "permissions": []
+}

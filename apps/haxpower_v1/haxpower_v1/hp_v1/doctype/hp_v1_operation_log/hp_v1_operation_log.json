@@ -15,7 +15,8 @@
   "result_revision",
   "notes",
   "result_status",
-  "quantity_effect"
+  "quantity_effect",
+  "native_actor"
  ],
  "fields": [
   {
@@ -106,6 +107,12 @@
    "fieldtype": "Data",
    "length": 20,
    "read_only": 1
+  },
+  {
+   "fieldname": "native_actor",
+   "label": "Native Actor",
+   "read_only": 1,
+   "fieldtype": "Data"
   }
  ],
  "allow_rename": 0,

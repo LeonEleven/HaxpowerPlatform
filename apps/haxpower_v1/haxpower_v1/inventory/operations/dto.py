@@ -77,9 +77,10 @@ class NativeLink:
 @dataclass(frozen=True)
 class Result:
     document_id: str
-    operation_id: str
+    operation_id: str | None
     revision: int
     status: str = "Effective"
+    submission_id: str | None = None
 
 
 def sum_demands(company: str, lines: tuple[Line, ...], *, location_field: str) -> dict[Bucket, Decimal]:

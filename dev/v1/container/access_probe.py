@@ -349,6 +349,15 @@ def verify_http(site):
             ("inventory version create", "POST", "/api/v2/document/HP%20V1%20Inventory%20Version", {}),
             *((f"internal count {method}", "POST", f"/api/method/haxpower_v1.inventory.stock_count.service.{method}", {})
               for method in ('create','get','record','discover','recount','complete')),
+            *((f"approval {doctype} REST list", "GET", f"/api/resource/{quote('HP V1 Approval ' + doctype, safe='')}", None)
+              for doctype in ("Settings", "Setting Change", "Submission", "Event", "Request")),
+            ("approval settings CRUD", "PATCH", "/api/v2/document/HP%20V1%20Approval%20Settings/inventory",
+             {"inventory_approval_enabled": 0}),
+            *((f"internal approval {method}", "POST", f"/api/method/haxpower_v1.approval.service.{method}", {})
+              for method in ("get_settings", "configure", "configuration_history", "approve", "reject", "withdraw", "revoke_approval", "history")),
+            ("internal transfer submission", "POST", "/api/method/haxpower_v1.inventory.transfer.service.submit", {}),
+            ("native Workflow action", "POST", "/api/method/frappe.model.workflow.apply_workflow",
+             {"doc": frappe.as_json({"doctype": "Stock Entry", "company": company}), "action": "Approve"}),
             ("native count helper", "POST", "/api/method/erpnext.stock.doctype.stock_reconciliation.stock_reconciliation.get_stock_balance_for", {}),
             ("native count REST create", "POST", "/api/resource/Stock%20Reconciliation", {}),
             ("native count Desk submit", "POST", "/api/method/frappe.desk.form.save.savedocs",
@@ -406,12 +415,18 @@ def verify_http(site):
             business(selected_session, "specification summary", "get_specification", specification_id=sku.specification)
             business(all_session, "warehouse role cannot view product", "get_sku", sku_id=sku.name, status=403)
 
-            # Compare all mapped domain/native rows and raw stock counts across denied requests.
-            before = domain_snapshot(), stock_counts(), frappe.db.count("Version"), stock_snapshot(), inventory_snapshot()
+            from haxpower_v1.approval import TABLES as approval_tables
+
+            def persistent_state():
+                approval = {table: frappe.get_all(table, fields=["*"], order_by="name asc")
+                            for table in approval_tables}
+                return (domain_snapshot(), stock_counts(), frappe.db.count("Version"), stock_snapshot(),
+                        inventory_snapshot(), approval)
+
+            before = persistent_state()
             denial_matrix(native_session, all_session, operator_session)
             frappe.db.rollback()
-            require((domain_snapshot(), stock_counts(), frappe.db.count("Version"), stock_snapshot(), inventory_snapshot()) == before,
-                    "denied requests left a persistent side effect")
+            require(persistent_state() == before, "denied requests left a persistent side effect")
 
             for prefix in ("/api/resource", "/api/v2/document"):
                 warehouses = call(native_session, f"{prefix} unmanaged Warehouse list", "GET", f"{prefix}/Warehouse",

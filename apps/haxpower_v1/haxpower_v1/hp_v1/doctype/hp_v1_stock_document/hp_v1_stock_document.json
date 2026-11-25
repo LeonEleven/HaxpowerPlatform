@@ -11,7 +11,8 @@
   "revision",
   "notes",
   "reason",
-  "effective_operation"
+  "effective_operation",
+  "approval_submission"
  ],
  "fields": [
   {
@@ -43,7 +44,7 @@
    "label": "Status",
    "fieldtype": "Select",
    "read_only": 1,
-   "options": "Draft\nEffective\nIn Transit\nPartially Received\nCompleted\nClosed with Return\nSuperseded",
+   "options": "Draft\nEffective\nIn Transit\nPartially Received\nCompleted\nClosed with Return\nSuperseded\nPending Approval\nRejected\nApproved\nReady to Dispatch",
    "reqd": 1
   },
   {
@@ -72,6 +73,13 @@
    "read_only": 1,
    "options": "HP V1 Operation Log",
    "reqd": 0
+  },
+  {
+   "fieldname": "approval_submission",
+   "label": "Approval Submission",
+   "read_only": 1,
+   "fieldtype": "Link",
+   "options": "HP V1 Approval Submission"
   }
  ],
  "allow_rename": 0,

@@ -47,7 +47,8 @@ class SubmitIssue:
 @dataclass(frozen=True)
 class IssueResult:
     document_id: str
-    operation_id: str
+    operation_id: str | None
     status: str
     revision: int
     lines: tuple[IssueLine, ...]
+    submission_id: str | None = None
