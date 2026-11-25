@@ -200,3 +200,19 @@ Outward Bundle、有效 SLE、Batch、Bin 和 GL。探针验证同桶合计、�
 探针在合成站配置单独的非标准 `HP V1 Transfer Dispatch` Stock Entry Type、明确的原生数量精度和受保护的系统 Transit 位置。发出使用合成员工身份。每次失败从新的 MariaDB 连接对比业务状态、归属和原生数量账。并发探针使用两个独立写连接和第三个复核连接。另通过真实 Cookie 会话核验内部发出、读取和原生 End Transit 入口的拒绝。
 
 [移库探针](container/transfer_probe.py) · [迁移及恢复](container/rehearsal.py) · [两腿对账和作用域](../../docs/ERPNEXT-V1-ADAPTATION-BOUNDARIES.md#v1-10-移库发出适配)
+
+## V1-11 部分接收及返源验证
+
+沿用一次性项目的 `preflight → up → prepare → integration → start → smoke → ci-clean`。
+接收通过同一事务内的原生 End Transit 入账，返源通过独立原生 Material Transfer 入账。
+探针核对原行归属、正负两腿、显式批次和 NO_BATCH、数量与估值守恒、原生累计实收、
+双侧授权、历史重放及逐表故障回滚。并发使用两个写连接和第三个复核连接。
+合成估值和授权配置限于隔离站点，正式员工写入继续关闭。
+
+升级基线固定在已合并的 V1-10 `a6d2bc4da1011922c78ff9ac06e88849e71695c0`。
+在安装该 App 版本期间生成两笔真实发出并保存原请求、归属及原生历史。
+迁移后按原记录接收及返源，保留已关闭和部分接收各一笔。连续两次迁移对比完整快照。
+注入失败后恢复同一套数据库、站点配置及公私文件，继续处理部分接收单的剩余在途。
+验证历史状态与原发出重放在整个过程保持一致。
+
+[生命周期探针](container/transfer_followup_probe.py) · [升级与恢复](container/rehearsal.py)

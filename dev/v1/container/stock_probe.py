@@ -518,11 +518,33 @@ def verify_persisted():
             == len(state[store.SYNTHETIC_DETAIL]["rows"])
             and {link.operation_id for link in links} == {req.result_operation for req in requests},
             "persisted stock execution records have missing references")
+    history = {}
     for req in requests:
         log, = rows(state, store.LOG, name=req.result_operation)
         document, = rows(state, store.DOCUMENT, name=req.document_id)
+        dispatch = log.original_operation or log.name
         require(req.status == "Completed" and len(req.payload_digest) == 64
-                and req.result_operation == document.effective_operation and log.request_id == req.name,
+                and req.result_revision == log.result_revision and req.company == document.company
+                and dispatch == document.effective_operation
+                and (log.request_id, log.document_id, log.actor, log.action, log.status)
+                == (req.name, document.name, req.actor, req.command, "Effective"),
                 "persisted operation or request identity drift")
+        if log.original_operation:
+            require(document.document_type == "Material Transfer" and log.action in ("Receive Transfer", "Return Transfer")
+                    and log.effect_key == req.name and log.get("result_status"),
+                    "persisted transfer follow-up lost effect or original dispatch identity")
+        else:
+            require(log.effect_key == "APPLY" and log.result_revision == 2, "original operation identity drift")
+        history.setdefault(document.name, []).append(log)
+    for identity, operations in history.items():
+        document, = rows(state, store.DOCUMENT, name=identity)
+        operations.sort(key=lambda log: log.result_revision)
+        require([log.result_revision for log in operations] == list(range(2, document.revision + 1))
+                and operations[0].name == document.effective_operation,
+                "persisted operation history is not continuous")
+        latest = operations[-1]
+        legacy_status = "In Transit" if latest.action == "Material Transfer" else "Effective"
+        require((latest.get("result_status") or legacy_status) == document.status,
+                "latest operation and current document status differ")
     print(f"Fresh connection verified {len(requests)} committed requests and {len(links)} stable native links.",
           flush=True)

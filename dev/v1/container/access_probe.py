@@ -335,6 +335,8 @@ def verify_http(site):
             ("internal issue availability", "POST", "/api/method/haxpower_v1.inventory.issue.service.get_availability", {}),
             ("internal transfer draft", "POST", "/api/method/haxpower_v1.inventory.transfer.service.create_draft", {}),
             ("internal transfer dispatch", "POST", "/api/method/haxpower_v1.inventory.transfer.service.dispatch", {}),
+            ("internal transfer receive", "POST", "/api/method/haxpower_v1.inventory.transfer.service.receive", {}),
+            ("internal transit return", "POST", "/api/method/haxpower_v1.inventory.transfer.service.return_remaining", {}),
             ("internal transfer detail", "POST", "/api/method/haxpower_v1.inventory.transfer.service.get_dispatch", {}),
             ("internal transit ownership", "GET", "/api/resource/HP%20V1%20Transit%20Ownership", {}),
             ("native End Transit mapper", "POST",
@@ -441,6 +443,6 @@ def verify_http(site):
         server.server_close()
         frappe.db.rollback()
     verify_scope_concurrency(site, absent[0], company, w1.id)
-    print(f"V1-05–V1-07 cookie-session HTTP matrix: {len(outcomes)} checks", flush=True)
+    print(f"V1 cookie-session HTTP matrix: {len(outcomes)} checks", flush=True)
     for label, code in outcomes:
         print(f"  {code} {label}", flush=True)

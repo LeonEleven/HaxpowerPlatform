@@ -22,7 +22,9 @@ RECEIPT = "Material Receipt"
 ISSUE = "Material Issue"
 TRANSFER = "Material Transfer"
 DISPATCH_TYPE = "HP V1 Transfer Dispatch"
+DISPATCH, RECEIVE, RETURN = "Dispatch", "Receive", "Return"
 _scope = ContextVar("hp_v1_native_stock_entry", default=None)
+_updating_original = ContextVar("hp_v1_updating_original_entry", default=None)
 
 
 @dataclass(frozen=True)
@@ -35,6 +37,9 @@ class Leg:
     uom: str
     quantity: Decimal
     counterpart: str | None = None
+    original_detail: str | None = None
+    original_entry: str | None = None
+    ownership_id: str | None = None
 
     @property
     def source(self):
@@ -52,10 +57,13 @@ class Posting:
     bundles: dict[tuple[str, str], str]
     purpose: str = RECEIPT
     inward: dict[str, Leg] = field(default_factory=dict)
+    transfer_action: str = DISPATCH
+    original_totals: dict[str, Decimal] = field(default_factory=dict)
+    original_percent: Decimal = Decimal(0)
 
     @property
     def action(self):
-        return {ISSUE: "Issue", RECEIPT: "Receipt", TRANSFER: "Dispatch"}[self.purpose]
+        return self.transfer_action if self.purpose == TRANSFER else {ISSUE: "Issue", RECEIPT: "Receipt"}[self.purpose]
 
 
 def _number(value):
@@ -69,8 +77,9 @@ def _leg(row, leg):
         == (leg.item, leg.warehouse, leg.batch, leg.uom, leg.uom)
         and _number(row.qty) == leg.quantity.copy_abs() and _number(row.conversion_factor) == 1
         and (opposite or None) == leg.counterpart and not row.serial_no and row.use_serial_batch_fields == 1
+        and ((row.ste_detail or None), (row.against_stock_entry or None)) == (leg.original_detail, leg.original_entry)
         and (not leg.counterpart or not any(row.get(key) for key in (
-            "ste_detail", "against_stock_entry", "material_request", "material_request_item",
+            "material_request", "material_request_item",
             "sco_rm_detail", "pick_list_item", "job_card_item",
         )))
     )
@@ -87,23 +96,32 @@ def _bundle(doc, leg):
     )
 
 
-def _entry_shape(entry, scope):
+def _entry_header(entry, scope):
     transit = scope.purpose == TRANSFER
+    dispatch = transit and scope.action == DISPATCH
+    outgoing = scope.legs[0].original_entry if transit and scope.action == RECEIVE else None
     return (
         entry.company == scope.company and entry.purpose == scope.purpose
-        and entry.stock_entry_type == (DISPATCH_TYPE if transit else scope.purpose)
-        and entry.add_to_transit == int(transit) and not entry.from_warehouse
+        and entry.stock_entry_type == (DISPATCH_TYPE if dispatch else scope.purpose)
+        and entry.add_to_transit == int(dispatch) and not entry.from_warehouse
         and (scope.purpose == RECEIPT or not entry.to_warehouse)
+        and (not transit or (entry.outgoing_stock_entry or None) == outgoing)
         and (not transit or not any(entry.get(key) for key in (
-            "outgoing_stock_entry", "work_order", "subcontracting_order", "pick_list", "is_return",
-            "additional_costs", "project", "inspection_required", "from_bom", "job_card",
+            "work_order", "subcontracting_order", "pick_list", "is_return", "source_stock_entry",
+            "additional_costs", "project", "inspection_required", "from_bom", "job_card", "amended_from",
         )))
+    )
+
+
+def _entry_shape(entry, scope):
+    return (
+        _entry_header(entry, scope)
         and len(entry.items) == len(scope.legs)
         and all(_leg(row, leg) for row, leg in zip(entry.items, scope.legs, strict=True))
     )
 
 
-def allows_dispatch_write(doc, event):
+def allows_transfer_write(doc, event):
     scope = _scope.get()
     return bool(scope and scope.purpose == TRANSFER and allows_write(doc, event))
 
@@ -112,6 +130,8 @@ def allows_write(doc, event):
     scope = _scope.get()
     if not scope or scope.actor != frappe.session.user or not _native_orm_active.get():
         return False
+    if doc is _updating_original.get():
+        return event == "before_change"
     entry = scope.entry
     if doc.doctype == ENTRY and doc is entry:
         return (
@@ -165,6 +185,47 @@ class StockEntryBundlePermissions:
         if user in (None, frappe.session.user) and permtype in events and allows_write(self, events[permtype]):
             return True
         return super().has_permission(permtype, debug=debug, user=user)
+
+
+class TransitReceiptUpdates:
+    def get_stock_in_transferred_qty(self):
+        quantities, details = super().get_stock_in_transferred_qty()
+        scope = _scope.get()
+        if scope and self is scope.entry and scope.action == RECEIVE:
+            expected = {(self.outgoing_stock_entry, detail): qty for detail, qty in scope.original_totals.items()}
+            if (len(details) != len(expected) or set(details) != scope.original_totals.keys()
+                    or {key: _number(qty) for key, qty in quantities.items()} != expected):
+                raise StockError("RECEIVE_NATIVE_CUMULATIVE_INVALID")
+        return quantities, details
+
+    def db_set(self, fieldname, value=None, update_modified=True, notify=False, commit=False):
+        scope = _scope.get()
+        if not scope or scope.action != RECEIVE or self.name != scope.entry.outgoing_stock_entry:
+            return super().db_set(fieldname, value, update_modified, notify, commit)
+        if (
+            scope.actor != frappe.session.user or not _native_orm_active.get()
+            or scope.entry.docstatus != 1 or self.docstatus != 1 or self.company != scope.company
+            or self.purpose != TRANSFER or self.add_to_transit != 1
+            or not isinstance(fieldname, dict) or fieldname.keys() != {"per_transferred"}
+            or not percent_matches(fieldname["per_transferred"], scope.original_percent)
+            or value is not None or commit or not update_modified or not notify
+        ):
+            raise StockError("RECEIVE_NATIVE_CUMULATIVE_INVALID")
+        token = _updating_original.set(self)
+        try:
+            return super().db_set(fieldname, update_modified=True, notify=False)
+        finally:
+            _updating_original.reset(token)
+
+
+def transfer_percent(dispatched, received):
+    percent = (100 * received / dispatched).quantize(Decimal("0.000001"))
+    return Decimal(100) if percent >= Decimal("99.999999") else percent
+
+
+def percent_matches(value, expected):
+    # Native arithmetic rounds a binary float to six decimal places.
+    return abs(_number(value) - expected) <= Decimal("0.000001")
 
 
 def posting_legs(plan, *, source=False):
@@ -260,24 +321,36 @@ def verify_entry(scope):
         if not _leg(row, leg) or _number(row.transfer_qty) != leg.quantity.copy_abs():
             raise StockError(error)
         expected = (leg, scope.inward[leg.line_id]) if scope.inward else (leg,)
-        for index, effect in enumerate(expected):
-            sle = by_leg.get((row.name, effect.warehouse))
-            if not sle or (
-                sle.item_code, sle.company, _number(sle.actual_qty), sle.docstatus, sle.is_cancelled
-            ) != (effect.item, entry.company, effect.quantity, 1, 0):
-                raise StockError(error)
-            bundle_id = sle.serial_and_batch_bundle
-            if (not bundle_id or bundle_id in bundles or (index == 0 and row.serial_and_batch_bundle != bundle_id)):
-                raise StockError(error)
-            bundle = frappe.get_doc(BUNDLE, bundle_id, for_update=True)
-            if (
-                (bundle.docstatus, bundle.voucher_type, bundle.voucher_no, bundle.voucher_detail_no, bundle.company)
-                != (1, ENTRY, entry.name, row.name, entry.company) or not _bundle(bundle, effect)
-            ):
-                raise StockError(error)
-            bundles.add(bundle.name)
-        links.append(NativeLink(leg.line_id, scope.action, ENTRY, entry.name, DETAIL, row.name))
+        verify_legs(entry.company, entry.name, row, expected, by_leg, bundles, error)
+        links.append(NativeLink(leg.line_id, scope.action, ENTRY, entry.name, DETAIL, row.name, leg.ownership_id))
     return tuple(links)
+
+
+def verify_legs(company, entry_id, row, expected, by_leg, bundles, error):
+    for index, effect in enumerate(expected):
+        sle = by_leg.get((row.name, effect.warehouse))
+        if not sle or (
+            sle.item_code, sle.company, _number(sle.actual_qty), sle.docstatus, sle.is_cancelled
+        ) != (effect.item, company, effect.quantity, 1, 0):
+            raise StockError(error)
+        bundle_id = sle.serial_and_batch_bundle
+        if (not bundle_id or bundle_id in bundles or (index == 0 and row.serial_and_batch_bundle != bundle_id)):
+            raise StockError(error)
+        try:
+            bundle = frappe.get_doc(BUNDLE, bundle_id, for_update=True)
+        except frappe.DoesNotExistError:
+            raise StockError(error) from None
+        if (
+            (bundle.docstatus, bundle.voucher_type, bundle.voucher_no, bundle.voucher_detail_no, bundle.company)
+            != (1, ENTRY, entry_id, row.name, company) or not _bundle(bundle, effect)
+        ):
+            raise StockError(error)
+        part, = bundle.entries
+        if (part.docstatus, part.is_cancelled, part.item_code, part.warehouse, part.parenttype, part.parentfield) != (
+            1, 0, effect.item, effect.warehouse, BUNDLE, "entries",
+        ):
+            raise StockError(error)
+        bundles.add(bundle.name)
 
 
 def _verify_posting(scope, before, before_batch, deltas, *, allow_gl):

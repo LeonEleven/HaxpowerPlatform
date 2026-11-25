@@ -101,5 +101,24 @@ Material Issue 通过 `Stock Entry.insert()` 和 `submit()` 过账。每行业�
 原生发出使用 `insert()` 和 `submit()`。ERPNext 先依据源行建立 Outward Bundle，复制该 Bundle 生成同一 Detail 的 Inward Bundle，再分别过账源和目标方向 SLE。Detail 上的 Bundle 引用对应 Outward，入向引用从 Transit SLE 获取。对账核验两条腿、同批次、精确数量、目标物理库位、Bin 和 Batch 总量。合成候选允许原生库存估值随货移动，以会计精度核对每行净值为零，若产生 GL 则整个发出回滚。跨资产账户及正式会计配置仍由 B12 审定。
 [原生两腿过账](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/doctype/stock_entry/stock_entry.py#L2779-L2953) · [原生 Bundle 复制](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/controllers/stock_controller.py#L2872-L2922)
 
-原生作用域仅绑定认证员工、发出单、已验证源和在途叶仓及其原生行，保留 CRUD、取消、后台任务和提前提交的原有守卫。V1-11 可在自己的受控作用域使用 `outgoing_stock_entry` 和 `ste_detail`。锁定版 `make_stock_in_entry` 从发出行的原生 Transit 叶仓取源，按原生已转数量计算原行余量，通常将物理目标留空。V1-11 须使用 Haxpower 固化的目标和逐行额度。
-[原生 End Transit 映射](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/doctype/stock_entry/stock_entry.py#L5166-L5254)
+原生发出作用域绑定认证员工、发出单、已验证源和在途叶仓及其原生行，保留 CRUD、取消、
+后台任务和提前提交的原有守卫。
+
+## V1-11 End Transit 及返源
+
+ERPNext v16.55.0 的 `make_stock_in_entry` 用 `transfer_qty - transferred_qty` 选择原行，
+把原物料发出 Detail 的在途仓作为接收源，普通移库的物理目标留空。
+App 以固化的目标、SKU、单位、批次与实际接收量构造原生 Material Transfer。
+接收单 `add_to_transit = 0`，父单 `outgoing_stock_entry` 指原发出，行内
+`ste_detail` 指原发出 Detail、`against_stock_entry` 指同一原生发出单。
+按原生发出单分组，各组在同个事务入账。原生 `transferred_qty` 汇总已提交的接收 Detail，
+`per_transferred` 为已转数量占原单发出总量的百分比，ERPNext 按六位小数舍入并将接近
+100 的结果归为 100。作用域只允许预期的原发出 Detail 累计变化及父单百分比和修改元数据，
+并在提交后重验原发出记录、两腿有效 SLE 和显式 Batch Bundle。
+
+返源使用从系统 Transit 到原源库位的独立 Material Transfer，保留 App 的原行归属引用。
+返源单的原生接收引用为空，因此原生百分比只反映实际接收。含返源的领域单据关闭后，
+ERPNext 的 End Transit 计算仍会把已退数量显示为未接收量。员工的原生 End Transit 入口
+保持封闭，受控接收在每个原行上执行领域剩余额度，再核对原生库存和累计实收。
+两种动作均核对逐行估值守恒及无 GL，B12 的正式估值策略待审定。
+受控原生事务按当前数据库重新读取永续库存开关，隔离 ERPNext 在同一 Bench 进程的旧值。

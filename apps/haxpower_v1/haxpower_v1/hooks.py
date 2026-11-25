@@ -91,6 +91,9 @@ for _doctype in _STOCK_DOCUMENTS:
     ), _stock_guard)
     extend_doctype_class[_doctype] = [f"{_access}.StockLifecycle"]
 doc_events["Stock Entry"]["before_insert"] = [f"{_warehouse_adapter}.guard_stock_entry", _stock_guard]
+extend_doctype_class["Stock Entry"].append(
+    "haxpower_v1.adapters.erpnext.stock_entry.TransitReceiptUpdates"
+)
 doc_events["Stock Ledger Entry"]["before_insert"] = [f"{_warehouse_adapter}.guard_transit_posting", _stock_guard]
 doc_events["Batch"]["before_save"] = _stock_guard
 extend_doctype_class["Serial and Batch Bundle"].append(

@@ -286,9 +286,9 @@ def _reject_transit(name):
 
 
 def guard_stock_entry(doc, method=None):
-    from .stock_entry import allows_dispatch_write
+    from .stock_entry import allows_transfer_write
 
-    if allows_dispatch_write(doc, method):
+    if allows_transfer_write(doc, method):
         return
     names = {doc.from_warehouse, doc.to_warehouse}
     for row in doc.items:
@@ -298,7 +298,7 @@ def guard_stock_entry(doc, method=None):
 
 
 def guard_transit_posting(doc, method=None):
-    from .stock_entry import allows_dispatch_write
+    from .stock_entry import allows_transfer_write
 
-    if not allows_dispatch_write(doc, method):
+    if not allows_transfer_write(doc, method):
         _reject_transit(doc.warehouse)

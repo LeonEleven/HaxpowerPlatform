@@ -188,4 +188,20 @@ Bench 中的内部接口为 `haxpower_v1.inventory.receipt.service.create_draft`
 
 `dispatch(DispatchTransfer)` 接收原草稿和幂等键，返回 `transfer_id`、`operation_id`、`revision` 和 `In Transit` 状态。重复发出按原请求身份处理。发出前按授权重新读取草稿，核对两侧库位及每个合计后的源桶。过量返回 `INSUFFICIENT_STOCK`，原生在途与归属不一致返回 `TRANSFER_TRANSIT_OWNERSHIP_INCONSISTENT`，无法唯一解析有效系统位置时返回 `TRANSFER_TRANSIT_UNAVAILABLE`。
 
-`get_dispatch(company, transfer_id)` 是供 V1-11 使用的内部读取契约。它逐行返回稳定行 ID、源和目标、SKU、领域 Batch 选择和 ID、库存 UOM、已发数量、Transit 位置、归属 ID、原生发出单与明细及入向 SLE 引用。头部包含发出操作、版本、状态、操作者和时间。读取重验 Transfer 权限及两侧仓库范围。系统 Batch ID 保留在适配层，NO_BATCH 的 `batch_id` 为 `null`。原生引用仅供服务间关联。后续数量命令可在自己的事务中调用 `lock_original_dispatch` 重验同一快照。当前三个方法只在明确启用的独立合成 Bench 可用。
+`get_dispatch(company, transfer_id)` 是供 V1-11 使用的内部读取契约。它逐行返回稳定行 ID、源和目标、SKU、领域 Batch 选择和 ID、库存 UOM、已发数量、Transit 位置、归属 ID、原生发出单与明细及入向 SLE 引用。头部包含发出操作、版本、状态、操作者和时间。读取重验 Transfer 权限及两侧仓库范围。系统 Batch ID 保留在适配层，NO_BATCH 的 `batch_id` 为 `null`。原生引用仅供服务间关联。后续数量命令可在自己的事务中调用 `lock_original_dispatch` 重验同一快照。
+原发出操作、原行和原生关联固定，读取同时投影当前状态、revision、逐行实收、已退和剩余量。
+已关闭的历史也可按当前授权读取。这些方法只在明确启用的独立合成 Bench 可用。
+
+## 13. V1-11 内部接收与退回 DTO
+
+`receive(ReceiveTransfer)` 与 `return_remaining(ReturnTransfer)` 各接收 `company`、
+`transfer_id`、`expected_revision`、`idempotency_key`、本次 `lines`、原因及备注。
+每行只接收 `transfer_line_id` 和正数 Decimal 字符串 `quantity`。退回要求非空白原因。
+SKU、单位、批次、库位和原生记录由原发出证据确定。输入行 ID 必须唯一并属于该移库单。
+单行超出剩余在途返回 `TRANSFER_LINE_REMAINING_INSUFFICIENT`，旧版本的新操作返回
+`STOCK_REVISION_CONFLICT`，已关闭单据当前版本的新数量操作返回 `TRANSFER_ALREADY_CLOSED`。
+
+结果返回 `transfer_id`、本次 `operation_id`、本次结果 `status` 和 `revision`。
+摘要涵盖动作、认证人、公司、单据、期望版本、按 ID 排序的逐行规范数量、原因和备注。
+当前双侧权限通过后，同键同负载返回本次历史结果，后续版本推进或移库关闭时依然可重放。
+同键异负载返回 `STOCK_IDEMPOTENCY_CONFLICT`。正式员工 HTTP 数量入口仍关闭。

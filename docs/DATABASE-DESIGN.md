@@ -195,3 +195,16 @@ V1-09 沿用 V1-08 表结构。升级验收比较应用迁移前后的合成历�
 移库复用库存单头、逐行 ID、请求和轻量操作日志。`HP V1 Stock Document` 新增业务原因及 `In Transit` 状态。已有业务行字段保存两侧领域 Location、显式批次和精确数量。状态、版本和发出操作一次更新，日志记录实际员工、服务端创建时间和原因，并关联原幂等请求。`role=Dispatch` 的日志明细将业务行连到已提交的 Stock Entry 和 Stock Entry Detail。
 
 `HP V1 Transit Ownership` 为每条原发出行创建独立 ID，保存发出操作、业务行、系统 Transit 位置、原生 Detail 和有效原生 Inward SLE。业务行、原生 Detail 和 Inward SLE 各有唯一约束。归属记录和关联在发出事务中一起写入，常规权限无维护入口。该表没有数量列。原始已发量由固化业务行与原生双向 SLE 和 Bundle 共同核对。
+
+### V1-11 移库多动作历史
+
+`HP V1 Transit Ownership` 保留原行、发出操作、原生发出 Detail 及在途入向 SLE。
+接收与退回各添加独立 `HP V1 Operation Log`，通过 `original_operation` 指回发出。
+`HP V1 Operation Native Link` 的 `ownership_id` 将每次操作行关联回原始归属。
+后续原生单据与行沿用原生关联字段，操作者、原因、备注和时间保存在操作日志。
+累计量由有效原生行与 Bundle、SLE 核对后投影。
+
+发出占用业务单唯一 `APPLY` 效果键。后续效果键采用请求 ID，`(document_id, effect_key)`、
+`(document_id, result_revision)` 和请求唯一约束防止产生重复效果。业务单在当前行锁下按原
+状态和版本条件推进，`effective_operation` 始终保留发出操作。日志保存每次操作的历史结果状态
+和版本。V1-10 发出日志的历史状态从动作推导为 In Transit，安装和迁移保留已有日志与请求。

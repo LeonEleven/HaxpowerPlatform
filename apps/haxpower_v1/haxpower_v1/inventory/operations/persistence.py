@@ -31,6 +31,7 @@ INDEXES = (
     (REQUEST, "hp_v1_stock_request_identity", ("company", "actor", "command", "key_digest")),
     (LOG, "hp_v1_stock_effect", ("document_id", "effect_key")),
     (LOG, "hp_v1_stock_operation_request", ("request_id",)),
+    (LOG, "hp_v1_stock_operation_revision", ("document_id", "result_revision")),
     (LINK, "hp_v1_stock_native_reference", ("operation_id", "role", "parent_type", "parent_id", "detail_type", "detail_id")),
 )
 
@@ -61,12 +62,13 @@ def current(doctype, identity, fields):
     return frappe.db.get_value(doctype, identity, fields, as_dict=True, for_update=True)
 
 
-def update_document(document, result, *, status="Effective"):
+def update_document(document, result):
     frappe.db.sql(
         f"""UPDATE `tab{DOCUMENT}`
             SET status = %s, revision = %s, effective_operation = %s, modified_by = %s, modified = %s
-            WHERE name = %s AND revision = %s AND status = 'Draft' AND effective_operation IS NULL""",
-        (status, result.revision, result.operation_id, frappe.session.user, now_datetime(), document.name, document.revision),
+            WHERE name = %s AND revision = %s AND status = %s AND effective_operation <=> %s""",
+        (result.status, result.revision, document.effective_operation or result.operation_id, frappe.session.user,
+         now_datetime(), document.name, document.revision, document.status, document.effective_operation),
     )
     _assert_updated("STOCK_DOCUMENT_CHANGED")
 

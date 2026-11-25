@@ -185,9 +185,32 @@ Outward 与 Transit Inward 两条有效流水，原目标库位固化供接收�
 回归、精确两腿及跨单归属对账、双侧授权、独立连接争用和断连恢复已实测通过。独立永续库存
 候选生成 4.25 的双向库存账户 GL 后触发完整回滚。B04 同仓策略及接收岗位、
 B01、B03、B08 和 B12 保持待确认，发出仅在隔离合成环境启用。下一项为 V1-11。由项目负责人
-审查并手动合并 V1-10 后，接入逐原行部分接收与剩余退回。
+审查后，LeonEleven 于 10:46 手动合并 PR #23，合并提交为
+`a6d2bc4da1011922c78ff9ac06e88849e71695c0`。V1-11 从该提交开始。
 
-[V1-10 Draft PR #23](https://github.com/LeonEleven/HaxpowerPlatform/pull/23) · [PR #23 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/23/checks) · [V1-10 技术设计](TECHNICAL-DESIGN.md#v1-10-两阶段移库发出) · [隔离验收](../dev/v1/README.md#v1-10-两阶段移库发出验证)
+[V1-10 PR #23](https://github.com/LeonEleven/HaxpowerPlatform/pull/23) · [PR #23 CI](https://github.com/LeonEleven/HaxpowerPlatform/pull/23/checks) · [V1-10 技术设计](TECHNICAL-DESIGN.md#v1-10-两阶段移库发出) · [隔离验收](../dev/v1/README.md#v1-10-两阶段移库发出验证)
+
+**V1-11 部分接收与返源，2026-11-25 核对（Asia/Shanghai）。** App 0.12.0 从已合并的
+V1-10 开始。支持逐原行部分、多次及多行接收、剩余多次退回，以及累计量和含退回的关闭结果。
+接收使用原生 End Transit，返源追加独立 Material Transfer。原发出仍是单据的生效操作。
+后续动作各自推进 revision，已提交请求按当时结果及当前双侧授权重放。
+
+锁定合成站验证发 10、接 6、退 4，分三次接收 3、2、5，实批次与 NO_BATCH 混合，
+同桶跨单归属、精确小数和同一业务动作跨两个原生接收单的原子性。三组双写争用、固定旧读
+视图、接收/退回重放、权限撤销和断连恢复通过独立连接核对。接收、返源遇关闭期间、库存
+冻结或 4.25 借贷原生 GL 均回滚。正式员工数量写入继续关闭，B01、B03、B04、B06、B07、
+B08 和 B12 保持待确认。含原生库存的合成站连续两次 migrate，完整快照 SHA-256 均为
+`fc0603c77fa796a9dd1e9e6d1206ad526180093ad631dbe38519ff1d9857bbfe`。
+
+升级站在已合并的 V1-10 App 上生成两笔真实发出，升级时核对原单、归属、原生流水及请求。
+V1-11 对历史移库部分接收和返源，保留已关闭与仍有在途各一笔。重复迁移及迁移故障后的
+同备份集恢复通过，数据库、站点配置和公私文件均已核对。升级站的完整快照 SHA-256 为
+`538816a3591007d985a254dc2edd3483b88e9e6714b98d57f0ac5dd517291a1d`。
+恢复后原单剩余 4 件返源并关闭，历史发出请求仍返回原 revision 2。升级和恢复均通过 47 项
+Frappe 回归，真实 Cookie 会话矩阵通过 128 项检查。
+V1-11 经审查及手动合并后进入 V1-12 盘点版本集成。
+
+[V1-11 任务分支](https://github.com/LeonEleven/HaxpowerPlatform/tree/feat/v1-11-transfer-receipt-return) · [V1-11 PR](https://github.com/LeonEleven/HaxpowerPlatform/pulls?q=is%3Apr+head%3Afeat%2Fv1-11-transfer-receipt-return) · [验证入口](../dev/v1/README.md#v1-11-部分接收及返源验证)
 
 每次完成重要开发阶段时更新此节，记录日期、对应 PR 或提交、实际完成范围、验收证据、未决项及下一任务。PR 状态是带日期的核对结果，下一会话重新查询。
 

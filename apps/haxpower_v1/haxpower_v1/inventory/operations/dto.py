@@ -36,12 +36,18 @@ class Line:
 
 
 @dataclass(frozen=True)
+class LineQuantity:
+    line_id: str
+    quantity: str
+
+
+@dataclass(frozen=True)
 class Command:
     company: str
     document_id: str
     expected_revision: int
     idempotency_key: str
-    lines: tuple[Line, ...]
+    lines: tuple[Line | LineQuantity, ...]
     reason: str = ""
     original_operation: str | None = None
     notes: str | None = None
@@ -64,6 +70,7 @@ class NativeLink:
     parent_id: str
     detail_type: str
     detail_id: str
+    ownership_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -71,6 +78,7 @@ class Result:
     document_id: str
     operation_id: str
     revision: int
+    status: str = "Effective"
 
 
 def sum_demands(company: str, lines: tuple[Line, ...], *, location_field: str) -> dict[Bucket, Decimal]:
