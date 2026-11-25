@@ -334,7 +334,7 @@ def verify_http(site):
             ("internal stock executor", "POST", "/api/method/haxpower_v1.inventory.operations.synthetic.execute",
              {"command": {"document_id": stock_document}}),
             ("internal receipt draft", "POST", "/api/method/haxpower_v1.inventory.receipt.service.create_draft", {}),
-            ("internal receipt submit", "POST", "/api/method/haxpower_v1.inventory.receipt.service.submit", {}),
+            ("internal receipt submit", "POST", "/api/method/haxpower_v1.inventory.receipt.service.submit", {"approval_enabled": False}),
             ("internal issue draft", "POST", "/api/method/haxpower_v1.inventory.issue.service.create_draft", {}),
             ("internal issue submit", "POST", "/api/method/haxpower_v1.inventory.issue.service.submit", {}),
             ("internal issue availability", "POST", "/api/method/haxpower_v1.inventory.issue.service.get_availability", {}),

@@ -237,12 +237,14 @@ def settings_and_decisions(f):
         changed = receipts.revise_draft(replace(changed, lines=(replace(old_line, quantity="4"),)))
         require(changed.lines[0].line_id == old_line.line_id, "edited quantity lost line identity")
         again = pending(lambda: receipts.submit(SubmitReceipt(changed, uuid4().hex)))
-        withdrawn = service.withdraw(f.decision(again))
+        withdrawal = f.decision(again)
+        withdrawn = service.withdraw(withdrawal)
         require(withdrawn.status == "Draft", "creator cannot withdraw pending inventory")
         f.toggle(False)
         later = receipts.submit(SubmitReceipt(replace(changed, revision=withdrawn.revision), uuid4().hex))
         require(later.status == "Effective" and later.submission_id not in (submitted.submission_id, again.submission_id),
                 "resubmission reused old approval or current policy")
+        require(service.withdraw(withdrawal) == withdrawn, "withdrawal result changed after resubmission")
         with actor_session(f.approver, f.company):
             expect("APPROVAL_STATE_CONFLICT", lambda: service.approve(old))
             submissions = service.history(f.company, request.draft.document_id)["submissions"]
@@ -285,6 +287,12 @@ def authorization_and_stock(f):
             expect("denied", lambda: service.history(f.company, issue.document_id))
         with actor_session("Administrator", f.company):
             frappe.db.set_value("User", f.approver, "enabled", 1)
+            frappe.get_doc("User", f.approver).remove_roles(Operation.APPROVE.role)
+            frappe.db.commit()
+        with actor_session(f.approver, f.company):
+            expect("denied", lambda: service.approve(decision))
+        with actor_session("Administrator", f.company):
+            frappe.get_doc("User", f.approver).add_roles(Operation.APPROVE.role)
             frappe.db.commit()
 
         available = create(f.company, f.source, sku=f.sku)
@@ -420,16 +428,23 @@ def dispatch_lifecycle(f):
             approved = service.approve(f.decision(submitted))
         require(approved.status == policy.APPROVED, "approved transfer did not wait for dispatch")
         no_quantity(before)
+        expect("STOCK_DOCUMENT_NOT_EDITABLE", lambda: transfers.revise_draft(
+            replace(draft.draft, revision=approved.revision),
+        ))
+        revocation = f.decision(approved)
         with actor_session(f.approver, f.company):
-            revoked = service.revoke_approval(f.decision(approved))
+            revoked = service.revoke_approval(revocation)
+            require(service.revoke_approval(revocation) == revoked, "approval revocation did not replay")
         require(revoked.status == "Draft", "authorized clear of pre-dispatch approval failed")
         no_quantity(before)
         draft = replace(draft, draft=replace(draft.draft, revision=revoked.revision), idempotency_key=uuid4().hex)
         submitted = pending(lambda: transfers.submit(draft))
+        decision = f.decision(submitted)
         with actor_session(f.approver, f.company):
-            approved = service.approve(f.decision(submitted))
+            approved = service.approve(decision)
         sent = transfers.dispatch(replace(draft, draft=replace(draft.draft, revision=approved.revision)))
         with actor_session(f.approver, f.company):
+            require(service.approve(decision) == approved, "approved transfer did not replay after dispatch")
             expect("APPROVAL_STATE_CONFLICT", lambda: service.revoke_approval(f.decision(approved)))
         f.toggle(False)
         original = draft.draft.lines[0].transfer_line_id

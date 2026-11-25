@@ -265,7 +265,7 @@ B05-01–04 的正式批准日期和来源已写入 DECISIONS 第 8 节，其他
 [盘点验证入口](../dev/v1/README.md#v1-12-非冻结盘点和库存版本验证)
 
 
-**V1-13，2026-11-25（Asia/Shanghai）。** App 0.14.0 接入站点级审批开关、不可变提交快照、
+**V1-13 Draft PR #26，2026-11-25（Asia/Shanghai）。** App 0.14.0 接入站点级审批开关、不可变提交快照、
 修订重提、批准/驳回/撤回、移库发出前撤销，以及原生记账与审批成功的原子事务。B06-01–08
 由项目负责人在 V1-13 任务书第二节批准，见项目决策第 9 节。待审批盘点遵循 B05 代次和版本，
 过期后通过撤回及重盘衔接。移库接收及带原因余量退回无需重复审批。项目的审批人和库存操作者
@@ -279,5 +279,6 @@ B05-01–04 的正式批准日期和来源已写入 DECISIONS 第 8 节，其他
 并发和性能验证。
 
 [V1-13 任务分支](https://github.com/LeonEleven/HaxpowerPlatform/tree/feat/v1-13-approval-workflow) ·
-[对应 PR](https://github.com/LeonEleven/HaxpowerPlatform/pulls?q=is%3Apr+head%3Afeat%2Fv1-13-approval-workflow) ·
+[Draft PR #26](https://github.com/LeonEleven/HaxpowerPlatform/pull/26) ·
+[Actions 检查](https://github.com/LeonEleven/HaxpowerPlatform/pull/26/checks) ·
 [验收入口](../dev/v1/README.md#v1-13-库存审批验证)
