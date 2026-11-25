@@ -173,6 +173,8 @@ def run(site):
         result=finish(task,key=key); verify_effect(task,result,before)
         after=fresh()
         require(finish(task,key=key)==result and fresh()==after,'count idempotent replay wrote inventory/version')
+        equivalent=replace(task,lines=tuple(replace(r,actual_quantity=r.actual_quantity+'.000' if '.' not in r.actual_quantity else r.actual_quantity+'0') for r in task.lines))
+        require(finish(equivalent,key=key)==result and fresh()==after,'equivalent decimal actuals changed the canonical replay')
         reject('STOCK_IDEMPOTENCY_CONFLICT',lambda:finish(replace(task,lines=(replace(task.lines[0],actual_quantity='99'),*task.lines[1:])),key=key))
         reject('STOCK_DOCUMENT_ALREADY_EFFECTIVE',lambda:finish(task))
         noop=actual(create(company,source,Scope.SKU,sku))
@@ -225,16 +227,29 @@ def run(site):
         compete(site,actor,company,first,second)
         fault_task=create(company,source,Scope.SKU,sku)
         fault_task=actual(fault_task,{r.line_id:format(Decimal(r.snapshot_quantity)+1,'f') for r in fault_task.lines})
+        same_task_races(site,actor,company,source,sku)
         # Real native posting runs; inject failure only at each persistence boundary.
         original_insert=store.insert
+        original_write=versions._write
+        original_update=store.update_document
+        original_complete=store.complete_request
+        def fail_version(*args,**kwargs):
+            original_write(*args,**kwargs)
+            raise RuntimeError('Synthetic version SQL completed then failure')
+        def fail_state(*args):
+            original_update(*args)
+            raise RuntimeError('Synthetic task state SQL completed then failure')
+        def fail_result(*args):
+            original_complete(*args)
+            raise RuntimeError('Synthetic request SQL completed then failure')
         def fail_log(doctype,**kwargs):
             if doctype==store.LOG: raise RuntimeError('synthetic post-native log failure')
             return original_insert(doctype,**kwargs)
         for target,method,replacement in (
             (store,'insert',fail_log),
-            (versions,'advance',lambda *_:(_ for _ in ()).throw(RuntimeError('version write'))),
-            (store,'update_document',lambda *_:(_ for _ in ()).throw(RuntimeError('task state'))),
-            (store,'complete_request',lambda *_:(_ for _ in ()).throw(RuntimeError('request result'))),
+            (versions,'_write',fail_version),
+            (store,'update_document',fail_state),
+            (store,'complete_request',fail_result),
         ):
             with patch.object(target,method,replacement):
                 reject('STOCK_PERSISTENCE_FAILED',lambda:finish(fault_task))
@@ -580,3 +595,25 @@ def backfill_fault():
         except StockError as error:require(error.code=='INVENTORY_VERSION_NOT_READY','wrong missing epoch refusal')
         else:raise RuntimeError('failed backfill left quantity execution open')
     print('V1-11 upgrade baseline failure: actual initializer rolled back epoch and partial counters; quantity execution remains closed.',flush=True)
+
+
+def same_task_races(site,actor,company,location,sku):
+    for same_key in (True,False):
+        task=create(company,location,sku=sku)
+        task=actual(task,{task.lines[0].line_id:format(Decimal(task.lines[0].snapshot_quantity)+1,'f')})
+        old=counters(company,location,sku)
+        barrier=Barrier(2,timeout=60);ids=[];key=uuid4().hex
+        def before_guard(db):
+            ids.append(db.sql('SELECT CONNECTION_ID()')[0][0]);barrier.wait()
+        def run(index):
+            with session(site,actor,company),counts.synthetic_candidate(company,limits=LIMITS):
+                try:return finish(task,key=key if same_key else key+str(index),before_guard=before_guard)
+                except StockError as error:return error.code
+        with ThreadPoolExecutor(max_workers=2) as pool:results=tuple(pool.map(run,(0,1)))
+        if same_key:require(results[0]==results[1] and not isinstance(results[0],str),'concurrent count retry was not idempotent')
+        else:require(results.count('STOCK_DOCUMENT_ALREADY_EFFECTIVE')==1,'different-key same-task count completed twice')
+        with connection() as third:
+            from haxpower_v1.inventory.guard import lock_stock_writes
+            lock_stock_writes(company);ids.append(third.sql('SELECT CONNECTION_ID()')[0][0]);versions.verify()
+        require(len(set(ids))==3 and counters(company,location,sku)==tuple(x+1 for x in old),'same-task retry advanced inventory twice')
+    print('COUNT same-task races: same-key replay and different-key uniqueness verified by third connection.',flush=True)
