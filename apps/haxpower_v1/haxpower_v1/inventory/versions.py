@@ -76,7 +76,7 @@ def read(company, location, scope, sku=None, kind=None, batch_id=None):
     return int(row.counter) if row else 0
 
 
-def facts():
+def _entries():
     """Reconcile all managed native quantity history, including zeroed buckets."""
     from ..catalog.sku_persistence import SKU
     from ..warehouse.persistence import LOCATION, WAREHOUSE
@@ -146,11 +146,16 @@ def facts():
             sku_ids = sorted({item for item, _ in selected})
             managed_skus = tuple(_load_sku(skus[item].name, locked=True) for item in sku_ids)
             read_source(company, selected, managed_skus)
-    return {bucket:digest(sorted(entries)) for bucket,entries in result.items()}
+    return result
 
 
-def verify():
-    generation, current = epoch(), facts()
+def facts():
+    return {bucket:digest(sorted(entries)) for bucket,entries in _entries().items()}
+
+
+def verify(*, include_entries=False):
+    generation, entries = epoch(), _entries()
+    current = {bucket:digest(sorted(rows)) for bucket,rows in entries.items()}
     recorded = frappe.db.get_values(VERSION, {'scope':'BUCKET'},
                                    ('company','location_id','sku_id','batch_key','generation','fact_digest'),
                                    as_dict=True, for_update=True)
@@ -174,7 +179,7 @@ def verify():
                 or not 0 <= int(row.counter) < 10**38
                 or row.name != identity(row.company,row.location_id,row.scope,row.sku_id,row.batch_key)):
             raise StockError('INVENTORY_VERSION_NOT_READY')
-    return current
+    return (current, entries) if include_entries else current
 
 
 def advance(before, links):

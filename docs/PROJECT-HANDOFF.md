@@ -282,3 +282,13 @@ B05-01–04 的正式批准日期和来源已写入 DECISIONS 第 8 节，其他
 [Draft PR #26](https://github.com/LeonEleven/HaxpowerPlatform/pull/26) ·
 [Actions 检查](https://github.com/LeonEleven/HaxpowerPlatform/pull/26/checks) ·
 [验收入口](../dev/v1/README.md#v1-13-库存审批验证)
+
+**V1-14 工程分支，2026-11-26（Asia/Shanghai）。** V1-13 PR #26 已于 14:47 合并，
+V1-14 从 `3358612b41c51c7294bdc8e3069dde8ae0408794` 开始。项目负责人在任务书第二节批准
+B07-01–06 和 B08-01–03，见 [项目决策第 10 节](DECISIONS.md#10-b07-库存纠错与-b08-审计留存2026-11-26)。
+App 0.15.0 在隔离候选中加入反向纠错、独立审批、下游人工审核、原行额度及轻量追溯。保留 V1-11 余量返源。
+B02 岗位、B11 生产备份和 B12 正式估值待审。G04/G07/G08 保留生产验收条件。V1-20 须复核多年历史量、
+共享锁耗时和正式审批权限。工程验收证据见任务 PR 的检查；合并后下一任务为 V1-15 查询和报表。
+
+[V1-14 专属分支](https://github.com/LeonEleven/HaxpowerPlatform/tree/feat/v1-14-stock-corrections-audit) ·
+[合成验证入口](../dev/v1/README.md#v1-14-专项纠错与轻量审计验证)

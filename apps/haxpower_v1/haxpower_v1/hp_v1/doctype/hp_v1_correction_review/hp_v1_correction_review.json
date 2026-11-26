@@ -1,0 +1,66 @@
+{
+ "doctype": "DocType",
+ "name": "HP V1 Correction Review",
+ "module": "HP V1",
+ "engine": "InnoDB",
+ "field_order": [
+  "correction_id",
+  "submission_id",
+  "actor",
+  "action",
+  "evidence",
+  "reason",
+  "resolution_document"
+ ],
+ "fields": [
+  {
+   "fieldname": "correction_id",
+   "label": "Correction Id",
+   "fieldtype": "Link",
+   "read_only": 1,
+   "options": "HP V1 Stock Correction"
+  },
+  {
+   "fieldname": "submission_id",
+   "label": "Submission Id",
+   "fieldtype": "Link",
+   "read_only": 1,
+   "options": "HP V1 Approval Submission"
+  },
+  {
+   "fieldname": "actor",
+   "label": "Actor",
+   "fieldtype": "Link",
+   "read_only": 1,
+   "options": "User"
+  },
+  {
+   "fieldname": "action",
+   "label": "Action",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "evidence",
+   "label": "Evidence",
+   "fieldtype": "Long Text",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reason",
+   "label": "Reason",
+   "fieldtype": "Small Text",
+   "read_only": 1
+  },
+  {
+   "fieldname": "resolution_document",
+   "label": "Resolution Document",
+   "fieldtype": "Link",
+   "read_only": 1,
+   "options": "HP V1 Stock Document"
+  }
+ ],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "permissions": []
+}

@@ -159,7 +159,8 @@ def verify_http(site):
     require(stock_document, "missing committed synthetic stock document for HTTP verification")
     all_user = synthetic_user(run_id, "all", Operation.WAREHOUSE_READ, Operation.INVENTORY_READ)
     selected = synthetic_user(run_id, "selected", Operation.WAREHOUSE_READ, Operation.TRANSFER, Operation.PRODUCT_READ)
-    operator = synthetic_user(run_id, "operator", Operation.WAREHOUSE_MAINTAIN, Operation.RECEIVE, Operation.ISSUE, Operation.COUNT)
+    operator = synthetic_user(run_id, "operator", Operation.WAREHOUSE_MAINTAIN, Operation.RECEIVE, Operation.ISSUE,
+                              Operation.COUNT, Operation.CORRECTION_APPROVE)
     approver = synthetic_user(run_id, "approver", Operation.APPROVE, Operation.WAREHOUSE_READ)
     empty = synthetic_user(run_id, "empty", Operation.WAREHOUSE_READ)
     absent = synthetic_user(run_id, "absent", Operation.WAREHOUSE_READ)
@@ -355,6 +356,12 @@ def verify_http(site):
              {"inventory_approval_enabled": 0}),
             *((f"internal approval {method}", "POST", f"/api/method/haxpower_v1.approval.service.{method}", {})
               for method in ("get_settings", "configure", "configuration_history", "approve", "reject", "withdraw", "revoke_approval", "history")),
+            *((f"correction {doctype} REST list", "GET", f"/api/resource/{quote(doctype, safe='')}", None)
+              for doctype in ("HP V1 Stock Correction", "HP V1 Correction Review")),
+            *((f"correction {method} internal RPC", "POST",
+               f"/api/method/haxpower_v1.inventory.corrections.service.{method}", {"force": True})
+              for method in ("eligibility", "save_draft", "submit", "approve", "history", "close_review")),
+            ("operation trace internal RPC", "POST", "/api/method/haxpower_v1.inventory.operations.trace.detail", {}),
             ("internal transfer submission", "POST", "/api/method/haxpower_v1.inventory.transfer.service.submit", {}),
             ("native Workflow action", "POST", "/api/method/frappe.model.workflow.apply_workflow",
              {"doc": frappe.as_json({"doctype": "Stock Entry", "company": company}), "action": "Approve"}),
@@ -416,10 +423,11 @@ def verify_http(site):
             business(all_session, "warehouse role cannot view product", "get_sku", sku_id=sku.name, status=403)
 
             from haxpower_v1.approval import TABLES as approval_tables
+            from haxpower_v1.inventory.corrections import TABLES as correction_tables
 
             def persistent_state():
                 approval = {table: frappe.get_all(table, fields=["*"], order_by="name asc")
-                            for table in approval_tables}
+                            for table in approval_tables + correction_tables}
                 return (domain_snapshot(), stock_counts(), frappe.db.count("Version"), stock_snapshot(),
                         inventory_snapshot(), approval)
 

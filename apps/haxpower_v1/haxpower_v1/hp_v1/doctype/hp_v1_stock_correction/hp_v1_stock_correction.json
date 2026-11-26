@@ -1,0 +1,45 @@
+{
+ "doctype": "DocType",
+ "name": "HP V1 Stock Correction",
+ "module": "HP V1",
+ "engine": "InnoDB",
+ "field_order": [
+  "original_operation",
+  "line_origins",
+  "replacement_document",
+  "replacement_required"
+ ],
+ "fields": [
+  {
+   "fieldname": "original_operation",
+   "label": "Original Operation",
+   "fieldtype": "Link",
+   "read_only": 1,
+   "options": "HP V1 Operation Log"
+  },
+  {
+   "fieldname": "line_origins",
+   "label": "Line Origins",
+   "fieldtype": "Long Text",
+   "read_only": 1
+  },
+  {
+   "fieldname": "replacement_document",
+   "label": "Replacement Document",
+   "fieldtype": "Link",
+   "read_only": 1,
+   "options": "HP V1 Stock Document",
+   "unique": 1
+  },
+  {
+   "fieldname": "replacement_required",
+   "label": "Replacement Required",
+   "fieldtype": "Check",
+   "default": "0",
+   "read_only": 1
+  }
+ ],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "permissions": []
+}

@@ -147,3 +147,7 @@ V1-13 的库存审批由 Haxpower 服务管理。Stock Entry 和 Stock Reconcili
 提交、取消、删除和后台入口沿用原生守卫。批准触发者与原生执行身份分别记录，盘点沿用 V1-12
 针对原生 helper 的 Custom DocPerm，审批角色本身没有额外原生权限。普通员工的正式数量 HTTP 写入
 等待发布验收。
+
+### V1-14 反向数量适配
+
+对原 SKU、叶仓、Batch 及 UOM 使用 Document 提交新增 Material Issue 或 Material Receipt。盘点按原生已分配净差反向，保留原 Stock Reconciliation。原生 Bundle、SLE、Batch、Bin 和 GL 随同一事务核对。隔离候选采用零估值，拒绝 GL 或价值差异，正式估值策略由 B12 审查。同桶后续依赖或已接收移库由应用留证处理。
