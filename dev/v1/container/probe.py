@@ -246,6 +246,10 @@ def main(action, site):
             from report_probe import run, verify_recovered
 
             (run if action == "inventory-reporting" else verify_recovered)(site)
+        elif action == "inventory-history-scale":
+            from report_probe import measure_native_history
+
+            measure_native_history(site)
         elif action == "access-http":
             from access_probe import verify_http
 

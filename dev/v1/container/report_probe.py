@@ -3,6 +3,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack, contextmanager
 from dataclasses import replace
+from datetime import datetime
 from decimal import Decimal
 from io import BytesIO
 import json
@@ -18,10 +19,12 @@ from frappe.app import application
 from openpyxl import load_workbook
 
 from haxpower_v1.access.config import set_scope
+from haxpower_v1.adapters.erpnext import receipt as native_receipt
 from haxpower_v1.access.policy import Mode, Operation
 from haxpower_v1.inventory.operations.transaction import connection
 from haxpower_v1.inventory.read import diagnostics
-from haxpower_v1.inventory.read.service import Inventory
+from haxpower_v1.inventory.read.query import Page
+from haxpower_v1.inventory.read.service import Inventory, inventory_data
 from haxpower_v1.inventory.receipt import service as receipts
 from haxpower_v1.inventory.transfer import dto as transfer, service as transfers
 from haxpower_v1.reporting import exports, workbook
@@ -32,6 +35,7 @@ from approval_probe import Fixture
 from identity import require
 from stock_probe import actor_session, session
 from count_probe import finish
+from receipt_probe import ensure_fiscal_year
 from warehouse_probe import _company_and_parent
 
 RPC = "/api/method/haxpower_v1."
@@ -155,6 +159,9 @@ def run(site):
         require(receipt["status"] == "Ready", f"export generation failed: {receipt}")
         identity = receipt["export_id"]
         request(stranger, "reporting.api.download", expected=403, body={"export_id": identity})
+        preserved = result(request, stranger, "reporting.api.generate",
+                           body={"report": "distribution", "criteria": explicit})
+        require(preserved["status"] == "Ready", "retained-permission recovery fixture did not generate")
         request(authorized, f"/private/haxpower_v1/exports/{identity}.xlsx", absolute=True, expected=(403, 404))
         request(authorized, f"/private/files/{identity}.xlsx", absolute=True, expected=(403, 404))
         request(authorized, "/api/resource/HP%20V1%20Export", absolute=True, expected=403)
@@ -321,8 +328,86 @@ def measure_catalog():
         print(f"V1-15 catalog scale: 1000 fixture SKUs, offset=900, size=100, wall={duration:.3f}s, "
               f"DB={sum(query_times):.3f}s/{len(query_times)} statements, Python peak={peak / 1024:.0f} KiB, "
               f"EXPLAIN={[(row[2], row[3], row[5], row[8]) for row in plans]}.", flush=True)
+        ids, total = search_sku_ids(f"{group} 活塞环 320")
+        products = catalog.by_ids(ids, details=True)
+        stream = BytesIO()
+        tracemalloc.start()
+        started = monotonic()
+        workbook.write(stream, "products", (products[identity] for identity in ids), deadline=started + 30)
+        elapsed = monotonic() - started
+        _, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        file_size = stream.tell()
+        book = load_workbook(stream, read_only=True)
+        try:
+            count = sum(1 for _ in book.active.values) - 1
+            require(count == total == 1000, "thousand-SKU workbook lost or duplicated rows")
+        finally:
+            book.close()
+        print(f"V1-15 workbook scale: rows={count}, XLSX={file_size} bytes, "
+              f"writer={elapsed:.3f}s, Python peak={peak / 1024:.0f} KiB.", flush=True)
     finally:
         frappe.db.rollback(save_point=point)
+
+
+def measure_native_history(site):
+    """Cost and conservation on a multi-year slice of actual native postings."""
+    from unittest.mock import patch
+    import tracemalloc
+
+    from haxpower_v1.adapters.erpnext import item
+    from haxpower_v1.catalog import sku
+    from haxpower_v1.catalog.sku_dto import SKUData
+    from haxpower_v1.catalog.sku_persistence import SKU
+
+    fixture = Fixture()
+    fixture.toggle(False)
+    base = frappe.db.get_value(SKU, fixture.sku, ("specification", "brand", "native_item_group", "stock_uom",
+                                                  "quantity_precision"), as_dict=True)
+    code = f"SYNTHETIC-REPORT-HISTORY-{uuid4().hex[:10].upper()}"
+    with patch.dict(frappe.conf, {item.SETTINGS: {
+        "item_group": base.native_item_group, "uom_precision": {base.stock_uom: base.quantity_precision},
+    }}):
+        fixture.sku = sku.create_sku(SKUData(code=code, specification=base.specification, brand=base.brand,
+                                             display_name="Synthetic native report history", stock_uom=base.stock_uom,
+                                             quantity_precision=base.quantity_precision)).id
+    year = frappe.utils.getdate().year
+    calendar = [datetime(yr, month, 15, 12)
+                for yr in range(year - 3, year) for month in (1, 4, 7, 10)]
+    for date in calendar[::4]:
+        if not frappe.db.exists("Fiscal Year", {
+            "year_start_date": ("<=", date.date()), "year_end_date": (">=", date.date()), "disabled": 0,
+        }):
+            ensure_fiscal_year(date)
+    reader = synthetic_user(uuid4().hex[:10], "read-history", Operation.INVENTORY_READ)
+    set_scope(reader[0], fixture.company, Mode.SELECTED, [fixture.warehouses[0]])
+    frappe.db.commit()
+    lines_per_posting = 16
+    with fixture.operate():
+        for date in calendar:
+            # Change only this synthetic adapter's posting timestamp. ERPNext
+            # still creates the native document, SLE, Bundle and Bin.
+            with patch.object(native_receipt, "now_datetime", return_value=date):
+                receipts.submit(fixture.receipt_command("1.125", lines=lines_per_posting))
+    criteria = dict(sku_id=fixture.sku, location_id=fixture.source, batch=None,
+                    start=calendar[0].date().isoformat(), end=calendar[-1].date().isoformat())
+    expected = Decimal("1.125") * len(calendar) * lines_per_posting
+    with actor_session(reader[0], fixture.company):
+        tracemalloc.start()
+        started = monotonic()
+        ledger = inventory_data("ledger", criteria, Page(100, 0))[0]
+        period = inventory_data("period", criteria, Page(100, 0))[0]
+        duration = monotonic() - started
+        _, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+    require(ledger["total"] == len(calendar) * lines_per_posting, "multi-year SLE page lost business rows")
+    bucket, = period["rows"]
+    require(Decimal(bucket["opening"]) == Decimal(bucket["decrease"]) == 0
+            and Decimal(bucket["increase"]) == Decimal(bucket["closing"]) == expected,
+            "multi-year report disagrees with native posting totals")
+    print(f"V1-15 native history: {ledger['total']} effective SLE across three posting years, "
+          f"fixed page=100 and period rollup, wall={duration:.3f}s, Python peak={peak / 1024:.0f} KiB.",
+          flush=True)
 
 
 def check_workbook():
@@ -346,14 +431,29 @@ def check_workbook():
 
 
 def verify_recovered(site):
-    row = frappe.db.get_value(exports.EXPORT, {"report": "distribution", "status": "Ready"},
-                              ("name", "requested_by", "file_size", "sha256"), as_dict=True)
-    require(row is not None, "recovery lost export authorization metadata")
-    data = exports.private_files.read(row.name, row.file_size, row.sha256)
-    require(data.startswith(b"PK"), "recovery lost the validated Excel contents")
-    require(frappe.db.exists(exports.DOWNLOAD, {"export_id": row.name, "actor": row.requested_by}),
-            "recovery lost download audit")
+    from haxpower_v1.access.policy import granted_operations
+
+    records = frappe.get_all(exports.EXPORT, filters={"report": "distribution", "status": "Ready"},
+                             fields=["name", "company", "requested_by", "file_size", "sha256"])
+    retained, revoked = [], []
+    for row in records:
+        data = exports.private_files.read(row.name, row.file_size, row.sha256)
+        require(data.startswith(b"PK"), "recovery lost the validated Excel contents")
+        with actor_session(row.requested_by, row.company):
+            if Operation.EXPORT in granted_operations():
+                _, recovered = exports.download(row.name)
+                require(recovered == data, "restored authorized workbook differs")
+                retained.append(row)
+            else:
+                try:
+                    exports.download(row.name)
+                except frappe.PermissionError:
+                    revoked.append(row)
+                else:
+                    raise AssertionError("recovery resurrected revoked export permissions")
+    require(bool(retained) and bool(revoked), "missing retained and revoked recovery fixtures")
+    require(all(frappe.db.exists(exports.DOWNLOAD, {"export_id": row.name, "actor": row.requested_by})
+                for row in revoked), "recovery lost download audit for revoked owners")
     with site_http(site) as (request, client):
-        guest = client()
-        request(guest, "reporting.api.download", body={"export_id": row.name}, expected=403)
-    print("V1-15 restored private Excel, download audit and anonymous download denial.", flush=True)
+        request(client(), "reporting.api.download", body={"export_id": retained[0].name}, expected=403)
+    print("V1-15 restored Excel contents, download audit, retained access and revocation denial.", flush=True)

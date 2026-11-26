@@ -226,6 +226,7 @@ def integration():
     inspect("approval", SITE)
     inspect("stock-correction", SITE)
     inspect("inventory-reporting", SITE)
+    inspect("inventory-history-scale", SITE)
     clean_with_stock = inspect("snapshot", SITE)
     repeat_migration(SITE, clean_with_stock)
     rehearse_upgrade(clean_with_stock)
@@ -289,8 +290,9 @@ def rehearse_upgrade(clean):
             inspect("stock-count", UPGRADE)
             inspect("count-recovery-prepare", UPGRADE)
             inspect("correction-baseline", UPGRADE)
-            inspect("approval-recovery-prepare", UPGRADE)
             inspect("correction-recovery-prepare", UPGRADE)
+            # Ordinary approval recovery requires the final recorded switch to be on.
+            inspect("approval-recovery-prepare", UPGRADE)
             baseline_state = inspect("snapshot", UPGRADE)
             record("merged V1-14 with native movements, counts, approvals and corrections", baseline_state)
             def failed_upgrade(state):
@@ -308,6 +310,10 @@ def run_upgraded_rehearsal(clean, baseline_state):
     upgraded = inspect("snapshot", UPGRADE)
     verify_reporting_upgrade(upgraded, baseline_state)
     record("V1-15 upgraded from merged V1-14; quantities, versions, approvals and corrections preserved", upgraded)
+    verify_upgraded_workflows(clean)
+
+
+def verify_upgraded_workflows(clean):
     inspect("approval-recovery-finish", UPGRADE)
     inspect("verify-inventory-versions", UPGRADE)
     inspect("verify-skus", UPGRADE)

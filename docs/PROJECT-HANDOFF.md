@@ -294,9 +294,12 @@ B02 岗位、B11 生产备份和 B12 正式估值待审。G04/G07/G08 保留生�
 [V1-14 工程检查](https://github.com/LeonEleven/HaxpowerPlatform/pull/27/checks) ·
 [合成验证入口](../dev/v1/README.md#v1-14-专项纠错与轻量审计验证)
 
-**V1-15，2026-11-27（Asia/Shanghai）。** PR #27 已由项目负责人合并。本任务以重新核对的
+**V1-15 Draft PR #28，2026-11-27（Asia/Shanghai）。** PR #27 已由项目负责人合并。本任务以重新核对的
 `5409db95919f8c86b7d003802a2cee1126a21ad8` 为分支基线，App 0.16.0 提供受控员工目录、
 库存与报表、分级审计、私有 Excel 和下载重验。B02/B09 已批准部分及来源见
 [项目决策第 11 节](DECISIONS.md#11-b02-和-b09-查询权限及功能范围)。任务分支包含
 [隔离验证及恢复入口](../dev/v1/README.md#v1-15-目录库存读取与导出验证)。
-验收结果随任务 PR 核对。审查及负责人合并后，下一任务为 V1-16 期初文件预览和清洗。
+隔离站的 48 项 Frappe 测试、员工 Cookie HTTP、原生一致读取和 Excel 撤权已通过。升级及发布
+证据随 [Draft PR #28](https://github.com/LeonEleven/HaxpowerPlatform/pull/28) 的
+[工程检查](https://github.com/LeonEleven/HaxpowerPlatform/pull/28/checks) 核对。审查及负责人
+合并后，下一任务为 V1-16 期初文件预览和清洗。

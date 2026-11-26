@@ -231,7 +231,7 @@ complete 携带任务投影（含期望 revision、原快照身份和稳定行�
 
 ## V1-15 员工目录、库存和报表 RPC
 
-使用已认证会话访问 `/api/method/haxpower_v1.<module>.<method>`。读取为 GET，Frappe 响应的 `message` 包含 DTO。分页使用 `page`（从 1 起）和 `pageSize`（1–100，默认 20），兼容原 `limit` 和零基 `offset`，每次请求选择一种。响应给出 `rows` 和授权后的 `total`。排序随报表固定并包含稳定 ID。JSON 对象 `criteria` 可作为 GET 查询参数编码；POST 使用 JSON 请求体。
+使用已认证会话访问 `/api/method/haxpower_v1.<module>.<method>`。读取为 GET，Frappe 响应的 `message` 包含 DTO。分页使用 `page`（从 1 起）和 `pageSize`（1–100，默认 20），兼容原 `limit` 和零基 `offset`，每次请求选择一种。响应给出 `rows`、授权后的 `total` 和快照时点 `as_of`。排序随报表固定并包含稳定 ID。JSON 对象 `criteria` 可作为 GET 查询参数编码；POST 使用 JSON 请求体。
 
 | 模块 | 方法 | 筛选及权限 |
 | --- | --- | --- |
