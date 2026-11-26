@@ -89,9 +89,9 @@ def _origin(company, operation_id, *, capability=True):
     return operation, document, locations, facts.original_lines(company, document)
 
 
-def _assess(company, operation, document, originals, selected=None):
+def _assess(company, operation, document, originals, selected=None, *, native=None):
     try:
-        return facts.assess(company, operation, document, originals, selected)
+        return facts.assess(company, operation, document, originals, selected, native=native)
     except StockError as error:
         if error.code not in INCONSISTENCIES:
             raise
@@ -313,8 +313,10 @@ def _resolve(command, skus):
 
 def _post(plan):
     execution = _execution.get()
-    if not execution or execution != (plan.command.company, plan.command.document_id,
-                                      plan.command.original_operation, frappe.session.user):
+    domain_command = replace(plan.command, lines=tuple(
+        replace(line, batch_id=None) if line.batch_kind == "NO_BATCH" else line for line in plan.command.lines
+    ))
+    if execution != (domain_command, frappe.session.user):
         raise StockError("CORRECTION_SPECIALIST_APPROVAL_REQUIRED")
     require_native_precision(plan.skus.values(), "CORRECTION_NATIVE_PRECISION_UNCONFIGURED")
     if any(not sku.code.startswith("SYNTHETIC-") for sku in plan.skus.values()):
@@ -393,7 +395,7 @@ def _approved_effect(database, submission, document, actor, identity, *, failed=
             request_id = kernel._digest(("Specialist Correction Effect", identity))
             digest = kernel.payload_digest(command, actor, action.name)
             kernel._reserve_request(command, action, actor, request_id, request_id, digest)
-            token = _execution.set((document.company, document.name, operation.name, submission.submitter))
+            token = _execution.set((command, submission.submitter))
             try:
                 applied = kernel._apply(database, command, loaded, lines, locations, action, verified_versions=before)
             finally:
@@ -447,6 +449,18 @@ def _association(company, document_id, *, effective=False):
     return header
 
 
+def _replacement(company, correction, document_id):
+    if correction.status != "Effective" or not correction.effective_operation:
+        raise StockError("APPROVAL_STATE_CONFLICT")
+    normal = _association(company, document_id)
+    if normal.effective_operation:
+        before = stock.current(stock.LOG, correction.effective_operation, ("creation",))
+        after, _, _ = facts.origin(company, normal.effective_operation, capability=False)
+        if not before or not before.creation or not after.creation or after.creation <= before.creation:
+            raise StockError("CORRECTION_ASSOCIATION_ORDER_INVALID")
+    return normal
+
+
 def _review_stage(database, payload, action, related, *, recovery):
     lock_stock_writes(payload.company)
     actor = policy.active_actor(locked=True)
@@ -461,7 +475,8 @@ def _review_stage(database, payload, action, related, *, recovery):
     _authorize_decision(action, actor, document, submission)
     if related:
         original = _case(document.name).original_operation
-        associated = _association(payload.company, related, effective=action == "Close Review")
+        associated = (_replacement(payload.company, document, related) if action == "Link Replacement"
+                      else _association(payload.company, related, effective=True))
         if associated.effective_operation == original:
             raise StockError("CORRECTION_ASSOCIATION_INVALID")
     if request:
@@ -485,7 +500,7 @@ def _review_stage(database, payload, action, related, *, recovery):
     else:
         if document.status != MANUAL or document.effective_operation:
             raise StockError("APPROVAL_STATE_CONFLICT")
-        status = CLOSED if action == "Close Review" else MANUAL
+        status = {"Close Review": CLOSED, "Reject Review": rules.REJECTED, "Review Note": MANUAL}[action]
         _review(document, submission, actor, action, [], reason=payload.reason, resolution=related)
         result = Result(document.name, None, document.revision + 1, status, submission.name)
         approval._set_state(document, result, submission.name)
@@ -517,6 +532,10 @@ def close_review(payload, *, resolution_document=None):
     return _review_action(payload, "Close Review", resolution_document)
 
 
+def reject_review(payload):
+    return _review_action(payload, "Reject Review", None)
+
+
 def link_replacement(payload, replacement_document):
     kernel._id(replacement_document)
     return _review_action(payload, "Link Replacement", replacement_document)
@@ -531,7 +550,7 @@ def history(company, correction_id):
         _require_read(company, original)
         replacement = None
         if case.replacement_document:
-            current = _association(company, case.replacement_document)
+            current = _replacement(company, document, case.replacement_document)
             replacement = {"document_id": current.name, "operation_id": current.effective_operation,
                            "status": current.status}
         fields = ("name", "submission_id", "actor", "action", "creation", "evidence", "reason", "resolution_document")

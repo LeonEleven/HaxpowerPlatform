@@ -4,6 +4,7 @@ from dataclasses import asdict
 
 import frappe
 
+from ...access import policy
 from ...approval import policy as rules
 from .. import versions
 from ..corrections import CASE, facts
@@ -46,15 +47,14 @@ def detail(company, operation_id):
         lock_stock_writes(company)
         log = stock.current(stock.LOG, operation_id, ("document_id", "name"))
         if not log or log.name != operation_id:
-            from ...access.policy import deny
-            deny()
+            policy.deny()
         document = facts.document(company, log.document_id)
         _authorize(company, document)
         operation = next((row for row in _operations(document) if row.name == operation_id), None)
         if not operation:
             raise StockError(facts.INVALID)
         lines = facts.original_lines(company, document)
-        _, entries = versions.verify(include_entries=True)
+        versions_before, entries = versions.verify(include_entries=True)
         allocations = facts._allocations(company, entries)
         references = frappe.db.get_values(stock.LINK, {"operation_id": operation_id},
             ("name", "line_id", "role", "parent_type", "parent_id", "detail_id"),
@@ -67,12 +67,30 @@ def detail(company, operation_id):
                     continue
                 key = (link.line_id, link.parent_type, link.parent_id, link.detail_id)
                 effects.setdefault(link.line_id, []).append({
-                    "reference_id": refs[key], "role": link.role, "bucket": asdict(bucket), "quantity": str(quantity),
+                    "reference_id": refs[key],
+                    "posting_id": kernel._digest((link.parent_type, link.parent_id)),
+                    "role": link.role, "bucket": asdict(bucket), "quantity": str(quantity),
                 })
         entitlements = {}
+        related_lines = {}
+        original_document = None
+        correction_id = None
         if document.document_type in (rules.RECEIPT, rules.ISSUE, rules.COUNT):
-            _, evidence, _ = _assess(company, operation, document, lines)
+            _, evidence, _ = _assess(company, operation, document, lines, native=(versions_before, allocations))
             entitlements = _public_evidence(evidence)
+        if document.document_type == rules.CORRECTION:
+            case = stock.current(CASE, document.name, ("original_operation", "line_origins"))
+            related_lines = facts.line_origins(case)
+            _, original, _ = facts.origin(company, case.original_operation, capability=False)
+            original_document = original.name
+        elif candidate := frappe.db.get_value(CASE, {"replacement_document": document.name}, "name", for_update=True):
+            try:
+                _authorize(company, facts.document(company, candidate))
+                correction_id = candidate
+            except frappe.PermissionError:
+                pass
         return {"document_id": document.name, "type": document.document_type, "operation": operation,
+                "original_document_id": original_document, "replaces_correction_id": correction_id,
                 "lines": [{**asdict(line), "effects": effects.get(line.line_id, []),
+                           "original_line_id": related_lines.get(line.line_id),
                            "entitlement": entitlements.get(line.line_id)} for line in lines]}

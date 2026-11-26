@@ -76,10 +76,11 @@ def origin(company, operation_id, *, capability=True):
 
 
 def _verify_origin_request(company, operation, header):
-    request = stock.current(stock.REQUEST, operation.request_id, (
+    fields = (
         "company", "actor", "command", "document_id", "result_operation", "status", "result_revision",
-    ))
-    if not request or tuple(request.values()) != (
+    )
+    request = stock.current(stock.REQUEST, operation.request_id, fields)
+    if not request or tuple(request[field] for field in fields) != (
         company, operation.actor, operation.action, header.name, operation.name, "Completed", operation.result_revision,
     ):
         raise StockError(INVALID)
@@ -139,14 +140,6 @@ def _allocations(company, entries):
     return allocations
 
 
-def _net(allocations, operation_id, line_id, expected_bucket):
-    matches = [(bucket, link, sle, qty)
-               for bucket, rows in allocations.items()
-               for link, sle, qty in rows
-               if (link.operation_id, link.line_id) == (operation_id, line_id)]
-    return _net_rows(matches, expected_bucket)
-
-
 def _net_rows(matches, expected_bucket):
     if any(bucket != expected_bucket for bucket, *_ in matches):
         raise StockError(INVALID)
@@ -155,27 +148,58 @@ def _net_rows(matches, expected_bucket):
         return sum((qty for *_, qty in matches), Decimal(0))
 
 
+def _validate_native_line(matches, expected_type, uom):
+    if not matches:
+        return
+    links = {(link.parent_type, link.parent_id, link.detail_type, link.detail_id, link.role)
+             for _, link, _, _ in matches}
+    if len(links) != 1:
+        raise StockError(INVALID)
+    (parent_type, parent, detail_type, detail, role), = links
+    if expected_type == rules.COUNT:
+        expected = ("Stock Reconciliation", "Stock Reconciliation Item", "Count")
+    else:
+        expected = ("Stock Entry", "Stock Entry Detail", "Receipt" if expected_type == rules.RECEIPT else "Issue")
+    if (parent_type, detail_type, role) != expected:
+        raise StockError(INVALID)
+    fields = ("parent", "parenttype", "parentfield", "docstatus")
+    if expected_type != rules.COUNT:
+        fields += ("stock_uom",)
+    row = frappe.db.get_value(detail_type, detail, fields, for_update=True)
+    expected_values = (parent, parent_type, "items", 1)
+    if expected_type != rules.COUNT:
+        expected_values += (uom,)
+    if row != expected_values:
+        raise StockError(INVALID)
+
+
 def _completed_counts(company, buckets, original):
     if not buckets:
         return []
     tasks = frappe.db.sql(
         f"""SELECT t.name,t.company,t.location_id,t.scope,t.sku_id,t.batch_kind,t.batch_id,t.generation,
-            t.snapshot_at,o.creation,o.name operation_id,o.action,o.status,o.result_revision,d.revision
-            FROM `tab{versions.TASK}` t JOIN `tab{stock.DOCUMENT}` d ON d.name=t.name
+            t.snapshot_at,o.creation,o.name operation_id,o.action,o.status,o.result_revision,d.revision,
+            d.status document_status
+            FROM `tab{stock.DOCUMENT}` d LEFT JOIN `tab{versions.TASK}` t ON d.name=t.name
             LEFT JOIN `tab{stock.LOG}` o ON o.name=d.effective_operation AND o.document_id=d.name
-            WHERE d.company=%s AND d.document_type=%s AND d.status='Completed' AND t.location_id IN %s
+            WHERE d.company=%s AND d.document_type=%s AND (d.status='Completed' OR d.effective_operation IS NOT NULL)
+                AND (t.name IS NULL OR t.location_id IN %s)
             FOR UPDATE""",
         (company, rules.COUNT, tuple(sorted({b.location_id for b in buckets}))), as_dict=True,
     )
     reasons = []
     for task in tasks:
+        if not task.name:
+            reasons.extend(_reason(INVALID, bucket=b, operation_id=task.operation_id) for b in buckets)
+            continue
         covered = [b for b in buckets if task.location_id == b.location_id and (
             task.scope == "LOCATION" or (task.sku_id == b.sku_id and (
                 task.scope == "SKU" or (task.scope == "BUCKET"
                     and (task.batch_kind, task.batch_id or None) == (b.batch_kind, b.batch_id)))))]
         if task.operation_id == original.name or not covered:
             continue
-        valid = (task.company == company and task.operation_id and task.action == rules.COUNT
+        valid = (task.company == company and task.document_status == "Completed"
+                 and task.operation_id and task.action == rules.COUNT
                  and task.status == "Effective" and task.result_revision == task.revision
                  and task.snapshot_at and task.snapshot_at <= task.creation)
         if valid and task.creation < original.creation:
@@ -189,14 +213,17 @@ def _completed_counts(company, buckets, original):
 
 
 def line_origins(case):
-    result = json.loads(case.line_origins)
-    if (not isinstance(result, dict) or len(set(result.values())) != len(result)
-            or not all(isinstance(value, str) for value in result.values())):
+    try:
+        result = json.loads(case.line_origins)
+    except (TypeError, ValueError):
+        raise StockError(INVALID) from None
+    if (not isinstance(result, dict) or not all(isinstance(value, str) for value in result.values())
+            or len(set(result.values())) != len(result)):
         raise StockError(INVALID)
     return result
 
 
-def _completed_corrections(company, original, originals, allocations):
+def _completed_corrections(company, original, originals, by_line):
     """Reconcile every consumed entitlement with its submitted native effect."""
     used = defaultdict(Decimal)
     related = defaultdict(list)
@@ -250,7 +277,9 @@ def _completed_corrections(company, original, originals, allocations):
                 raise StockError(INVALID)
             bucket, net, _ = originals[source_id]
             delta = Decimal(line.quantity)
-            actual = _net(allocations, row.effective_operation, line.line_id, bucket)
+            matches = by_line[row.effective_operation, line.line_id]
+            _validate_native_line(matches, rules.ISSUE if line.source else rules.RECEIPT, line.uom)
+            actual = _net_rows(matches, bucket)
             if (_bucket(company, line) != bucket or delta <= 0 or net == 0
                     or actual != (delta.copy_negate() if net > 0 else delta)
                     or bool(line.source) != (net > 0)):
@@ -260,26 +289,44 @@ def _completed_corrections(company, original, originals, allocations):
     return used, related
 
 
-def assess(company, operation, header, lines, selected=None):
+def assess(company, operation, header, lines, selected=None, *, native=None):
     """Return version proof, per-line evidence, and review reasons."""
     if header.document_type == rules.TRANSFER:
         return None, {}, [_reason(TRANSFER, operation_id=operation.name)]
     if header.document_type not in (rules.RECEIPT, rules.ISSUE, rules.COUNT):
         return None, {}, [_reason(UNSUPPORTED, operation_id=operation.name)]
+    expected_status = "Completed" if header.document_type == rules.COUNT else "Effective"
+    if header.status != expected_status or header.revision != operation.result_revision or not operation.creation:
+        raise StockError(INVALID)
     _verify_origin_request(company, operation, header)
     baseline = stock.current(versions.EPOCH, "inventory", ("generation", "baseline_at"))
-    before, entries = versions.verify(include_entries=True)
-    allocations = _allocations(company, entries)
-    if {link.line_id for rows in allocations.values() for link, _, _ in rows if link.operation_id == operation.name
-        } - {line.line_id for line in lines}:
+    if native is None:
+        before, entries = versions.verify(include_entries=True)
+        allocations = _allocations(company, entries)
+    else:
+        before, allocations = native
+    by_line = defaultdict(list)
+    for bucket, rows in allocations.items():
+        for link, sle, qty in rows:
+            by_line[link.operation_id, link.line_id].append((bucket, link, sle, qty))
+    origin_line_ids = {line_id for op, line_id in by_line if op == operation.name}
+    if origin_line_ids - {line.line_id for line in lines}:
         raise StockError(INVALID)
+    selected_buckets = {_bucket(company, line) for line in lines if selected is None or line.line_id in selected}
+    sle_ids = tuple(sorted({sle for bucket in selected_buckets for _, sle, _ in allocations[bucket]}))
+    metadata = {name: (created, value) for name, created, value in frappe.db.sql(
+        """SELECT name,creation,stock_value_difference FROM `tabStock Ledger Entry` WHERE name IN %s FOR UPDATE""",
+        (sle_ids,),
+    )} if sle_ids else {}
     count_rows = {row.name: row for row in counts._rows(header.name)} if header.document_type == rules.COUNT else {}
     originals = {}
     with localcontext() as context:
         context.prec = 64
         for line in lines:
             bucket = _bucket(company, line)
-            net = _net(allocations, operation.name, line.line_id, bucket)
+            matches = by_line[operation.name, line.line_id]
+            _validate_native_line(matches, header.document_type, line.uom)
+            net = _net_rows(matches, bucket)
             if header.document_type == rules.COUNT:
                 count = count_rows.get(line.line_id)
                 if not count or not count.confirmed or count.actual_quantity is None:
@@ -292,10 +339,11 @@ def assess(company, operation, header, lines, selected=None):
             if net != expected:
                 raise StockError(INVALID)
             originals[line.line_id] = (bucket, net, line.uom)
-        used, related = _completed_corrections(company, operation, originals, allocations)
+        used, related = _completed_corrections(company, operation, originals, by_line)
         evidence = {}
         reasons = []
         buckets = set()
+        removals = defaultdict(Decimal)
         for identity, (bucket, net, uom) in originals.items():
             limit = net.copy_abs()
             if used[identity] > limit:
@@ -305,35 +353,41 @@ def assess(company, operation, header, lines, selected=None):
                 buckets.add(bucket)
             if active and selected is not None and selected[identity] > limit - used[identity]:
                 reasons.append(_reason("CORRECTION_ENTITLEMENT_EXCEEDED", bucket=bucket, line_id=identity))
-            facts = [(link.operation_id, sle) for link, sle, _ in allocations[bucket]
-                     if link.operation_id == operation.name and link.line_id == identity]
+            if active and selected is not None and net > 0:
+                removals[bucket] += selected[identity]
+            native_sles = sorted(sle for _, _, sle, _ in by_line[operation.name, identity])
             evidence[identity] = {"bucket": asdict(bucket), "net": str(net), "used": str(used[identity]),
                                   "remaining": str(limit - used[identity]), "uom": uom,
                                   "corrections": sorted(op for op, _ in related[identity]),
-                                  "native_sle": sorted(sle for _, sle in facts),
+                                  "native_sle": native_sles,
                                   "generation": baseline.generation, "bucket_version": versions.read(
                                       bucket.company, bucket.location_id, "BUCKET", bucket.sku_id,
                                       bucket.batch_kind, bucket.batch_id),
                                   "fact_digest": before.get(bucket)}
             if not active:
                 continue
-            if facts and frappe.db.sql("""SELECT name FROM `tabStock Ledger Entry`
-                WHERE name IN %s AND (stock_value_difference<>0 OR creation>%s) FOR UPDATE""",
-                                     (tuple(sle for _, sle in facts), operation.creation)):
-                reasons.append(_reason("CORRECTION_ORIGINAL_VALUATION_OR_ORDER", bucket=bucket, line_id=identity))
+            if native_sles:
+                if any(not metadata[sle][0] or metadata[sle][0] > operation.creation for sle in native_sles):
+                    reasons.append(_reason(ORDER, bucket=bucket, line_id=identity))
+                if any(metadata[sle][1] for sle in native_sles):
+                    reasons.append(_reason("CORRECTION_VALUATION_UNSUPPORTED", bucket=bucket, line_id=identity))
             if not baseline.baseline_at or operation.creation <= baseline.baseline_at:
                 reasons.append(_reason(ORDER, bucket=bucket, line_id=identity))
             elif len({link.operation_id for link, _, _ in allocations[bucket]
                       if link.creation and link.creation > baseline.baseline_at}) < evidence[identity]["bucket_version"]:
                 reasons.append(_reason(ORDER, bucket=bucket, line_id=identity))
-            for link, _, _ in allocations[bucket]:
+            for link, sle, _ in allocations[bucket]:
                 if link.operation_id == operation.name or (link.operation_id, link.line_id) in related[identity]:
                     continue
-                if not link.creation or link.creation == operation.creation:
+                created = metadata[sle][0]
+                if not created or not link.creation or created > link.creation or link.creation == operation.creation:
                     reasons.append(_reason(ORDER, bucket=bucket, operation_id=link.operation_id, line_id=identity))
                 elif link.creation > operation.creation:
                     reasons.append(_reason(DOWNSTREAM, bucket=bucket, operation_id=link.operation_id, line_id=identity))
         reasons.extend(_completed_counts(company, buckets, operation))
+        for bucket, needed in removals.items():
+            if sum((qty for _, _, qty in allocations[bucket]), Decimal(0)) < needed:
+                reasons.append(_reason("INSUFFICIENT_STOCK", bucket=bucket, operation_id=operation.name))
     return before, evidence, list({approvals.encode(reason): reason for reason in reasons}.values())
 
 

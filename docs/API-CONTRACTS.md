@@ -225,6 +225,6 @@ complete 携带任务投影（含期望 revision、原快照身份和稳定行�
 
 ### V1-14 服务契约
 
-`inventory.corrections.service` 提供 `eligibility`、`save_draft`、`submit`、`approve`、`reject`、`withdraw`、`record_review`、`close_review`、`link_replacement` 和 `history`。申请行只接收原行 ID、数量字符串、原因和备注，服务端确定库存维度和反向方向。变更状态需要 revision，提交、审批及审核使用幂等键。review 状态记录危险依赖并阻断数量执行。获批后同键重放返回原结果。
+`inventory.corrections.service` 提供 `eligibility`、`save_draft`、`submit`、`approve`、`reject`、`withdraw`、`record_review`、`reject_review`、`close_review`、`link_replacement` 和 `history`。申请行只接收原行 ID、数量字符串、原因和备注，服务端确定库存维度和反向方向。变更状态需要 revision，提交、审批及审核使用幂等键。人工审核记录危险依赖并阻断数量执行。获批后同键重放返回原结果。
 
 `inventory.operations.trace.by_document` 和 `detail` 提供面向 V1-15 的受控读取。原行详情可查询原生关系令牌、按域维度的数量变动、部分纠错关联和剩余额度。DTO 保持领域 ID 及无批次语义。生产数量写入与完整查询分页、报表和导出遵循各自验收计划。

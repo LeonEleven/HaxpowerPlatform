@@ -11,12 +11,16 @@ import frappe
 
 from haxpower_v1.access.config import set_scope
 from haxpower_v1.access.policy import Mode, Operation
+from haxpower_v1.adapters.erpnext import receipt as native_receipt
 from haxpower_v1.approval import service as approval
 from haxpower_v1.approval.policy import PENDING
+from haxpower_v1.inventory import versions
+from haxpower_v1.inventory.corrections import TABLES as CORRECTION_TABLES
 from haxpower_v1.inventory.corrections import service, facts
 from haxpower_v1.inventory.issue import service as issues
 from haxpower_v1.inventory.operations import persistence as stock, trace
 from haxpower_v1.inventory.operations.dto import StockError
+from haxpower_v1.inventory.operations.transaction import connection
 from haxpower_v1.inventory.receipt import service as receipts
 from haxpower_v1.inventory.stock_count.dto import Scope
 from haxpower_v1.inventory.transfer import service as transfers
@@ -124,6 +128,16 @@ def native_cases(f):
                 "count correction used observed amount instead of native net difference")
         mixed = f.submit(count, ("1", "1"))
     before = current_state()
+    posting = native_receipt.post
+
+    def reject_after_second(plan, **kwargs):
+        posting(plan, **kwargs)
+        raise StockError("STOCK_PERSISTENCE_FAILED")
+
+    with f.specialist_session(), patch.object(native_receipt, "post", side_effect=reject_after_second) as second:
+        expect("STOCK_PERSISTENCE_FAILED", lambda: service.approve(f.decision(mixed)))
+        require(second.call_count == 1, "rollback probe never reached the second native posting")
+    no_quantity(before)
     approved = f.check(mixed)
     after = current_state()
     require(len(after["Stock Entry"]) == len(before["Stock Entry"]) + 2,
@@ -174,6 +188,19 @@ def blocked_cases(f):
         require(returned.status == "Closed with Return", "existing V1-11 return path changed")
     f.check(f.submit(original, ("1",)), service.MANUAL, blocked_code=facts.DOWNSTREAM)
     f.check(f.submit(dispatched, ("1",)), service.MANUAL, blocked_code=facts.TRANSFER)
+
+    with f.operate():
+        original = receipts.submit(f.receipt_command("4", lines=2))
+        first, second = f.original_rows(original.operation_id)
+    f.check(f.submit(original, ("1",)))
+    with f.operate():
+        draft = service.save_draft(f.company, original.operation_id, (service.Adjustment(second, "1"),),
+                                   "Different original line in the same bucket")
+        pending = service.submit(service.Submission(f.company, draft.document_id, draft.revision, uuid4().hex))
+        evidence = service.eligibility(f.company, original.operation_id)["lines"]
+        require(Decimal(evidence[first]["used"]) == 1 and Decimal(evidence[second]["used"]) == 0,
+                "same-bucket lines merged their entitlements")
+    f.check(pending, service.MANUAL, blocked_code=facts.DOWNSTREAM)
 
 
 def workflow(f):
@@ -229,6 +256,23 @@ def competing(site, f):
         eligibility = service.eligibility(f.company, original.operation_id)
         require([Decimal(line["remaining"]) for line in eligibility["lines"].values()] == [1],
                 "independent read did not reconcile competing approvals")
+        original = receipts.submit(f.receipt_command("5", sku=f.brand, source=f.target))
+        task = actual(create(f.company, f.target, Scope.BUCKET, f.brand))
+    pending = f.submit(original, ("1",))
+    outcomes = race(site, f, (
+        (f.specialist, lambda guard: approve(pending, guard)),
+        (f.operator, lambda guard: finish(task, before_guard=guard)),
+    ))
+    if outcomes[0].status == "Effective":
+        require(outcomes[1] in ("COUNT_SCOPE_CHANGED", "COUNT_BUCKET_CHANGED"), "correction did not stale an old count")
+    else:
+        require(outcomes[0].status == service.MANUAL and outcomes[1].status == "Completed",
+                "completed no-difference count and same-bucket correction both took effect")
+
+
+def _protected_rows():
+    with connection(read_committed=True):
+        return {table: frappe.get_all(table, fields=["*"], order_by="name") for table in CORRECTION_TABLES}
 
 
 def failures(f):
@@ -236,24 +280,47 @@ def failures(f):
         original = receipts.submit(f.receipt_command("5"))
     pending = f.submit(original, ("1",))
     with f.specialist_session():
-        decision = f.decision(pending)
-        before = current_state()
         native_insert = stock.insert
 
-        def fail_link(doctype, **fields):
-            if doctype == stock.LINK:
+        def fail_insert(doctype, **fields):
+            result = native_insert(doctype, **fields)
+            if doctype == target:
                 raise StockError("STOCK_PERSISTENCE_FAILED")
-            return native_insert(doctype, **fields)
+            return result
 
-        with patch.object(stock, "insert", fail_link):
-            expect("STOCK_PERSISTENCE_FAILED", lambda: service.approve(decision))
+        for target in (stock.LOG, stock.LINK):
+            decision = f.decision(pending)
+            before = current_state()
+            protected = _protected_rows()
+            with patch.object(stock, "insert", fail_insert):
+                expect("STOCK_PERSISTENCE_FAILED", lambda: service.approve(decision))
+            no_quantity(before)
+            require(_protected_rows() == protected, "rollback altered correction or review evidence")
+
+        advance = versions.advance
+
+        def fail_advance(*args):
+            advance(*args)
+            raise StockError("STOCK_PERSISTENCE_FAILED")
+
+        before = current_state()
+        with patch.object(versions, "advance", fail_advance):
+            expect("STOCK_PERSISTENCE_FAILED", lambda: service.approve(f.decision(pending)))
+        no_quantity(before)
+
+        def disconnected(database):
+            database.close()
+            raise OSError("synthetic disconnect before COMMIT")
+
+        before = current_state()
+        decision = f.decision(pending)
+        expect("STOCK_RETRY_REQUIRED", lambda: service.approve(decision, _commit=disconnected))
         no_quantity(before)
 
         def lost_response(database):
             database.sql("COMMIT")
             raise OSError("synthetic lost response")
 
-        decision = f.decision(pending)
         result = service.approve(decision, _commit=lost_response)
         require(result.status == "Effective" and service.approve(decision) == result,
                 "ambiguous COMMIT reposted or lost the committed specialist effect")
