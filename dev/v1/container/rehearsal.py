@@ -74,11 +74,11 @@ def verify_warehouse_schema(state):
             and not warehouse["native_leaves"], "warehouse schema missing or automatically seeded")
 
 
-def verify_access_schema(state):
+def verify_access_schema(state, *, role_count=13):
     access = state["access"]
     require(access and len(access["tables"]) == 2 and all(table and not table["rows"] for table in
             access["tables"].values()), "access schema missing or automatically seeded")
-    require(len(access["roles"]) == 12 and all(not role["desk_access"] and not role["disabled"]
+    require(len(access["roles"]) == role_count and all(not role["desk_access"] and not role["disabled"]
             for role in access["roles"]) and not access["assignments"], "employee capability roles were auto-assigned")
 
 
@@ -134,35 +134,18 @@ def verify_approval_install(state):
             "migration inferred historical approval facts")
 
 
-def verify_approval_upgrade(state, baseline, *, failed=False):
-    operations = dict(state["operations"])
-    added_fields = {"HP V1 Stock Document": "approval_submission", OPERATION_LOG: "native_actor"}
-
-    def normalized(schema, field):
-        ignored = (f"`{field}` ",)
-        if failed:
-            ignored += ("UNIQUE KEY `hp_v1_stock_operation_request`",)
-        lines = [line.strip().rstrip(",") for line in schema.splitlines()
-                 if not line.strip().startswith(ignored)]
-        indexes = tuple(sorted(line for line in lines if line.startswith(("PRIMARY KEY", "KEY ", "UNIQUE KEY", "CONSTRAINT "))))
-        structure = tuple(line for line in lines if not line.startswith(("PRIMARY KEY", "KEY ", "UNIQUE KEY", "CONSTRAINT ")))
-        return structure, indexes
-
-    for doctype, field in added_fields.items():
-        current, prior = operations[doctype], baseline["operations"][doctype]
-        require(all(row.get(field) is None for row in current["rows"]), f"migration inferred {field}")
-        require(normalized(current["schema"], field) == normalized(prior["schema"], field),
-                f"unexpected upgrade schema changes in {doctype}")
-        operations[doctype] = {"schema": prior["schema"],
-                               "rows": [{key: value for key, value in row.items() if key != field}
-                                        for row in current["rows"]]}
-    require(dict(state, operations=operations, approval=baseline["approval"]) == baseline,
-            "V1-13 migration altered existing state or quantity history")
-    if failed:
-        require(all(not table["rows"] for table in state["approval"].values()),
-                "failed migration initialized approval settings before schema hooks")
-    else:
-        verify_approval_install(state)
+def verify_correction_upgrade(state, baseline, *, failed=False):
+    tables = state["corrections"]
+    require(set(tables) == {"HP V1 Stock Correction", "HP V1 Correction Review"}
+            and all(not table["rows"] for table in tables.values()),
+            "migration inferred historical corrections or missed the correction schema")
+    access = dict(state["access"])
+    extra = [role for role in access["roles"] if role["name"] == "HP V1 Correction Approve"]
+    require(len(extra) == (0 if failed else 1) and all(not role["desk_access"] for role in extra),
+            "specialist role was not installed at the correct migration boundary")
+    access["roles"] = [role for role in access["roles"] if role not in extra]
+    require(dict(state, access=access, corrections=baseline["corrections"]) == baseline,
+            "V1-14 migration altered pre-existing roles, state or quantity history")
 
 
 def recovery_point(backup):
@@ -239,6 +222,7 @@ def integration():
     inspect("stock-count-extended", SITE)
     inspect("stock-count-native", SITE)
     inspect("approval", SITE)
+    inspect("stock-correction", SITE)
     clean_with_stock = inspect("snapshot", SITE)
     repeat_migration(SITE, clean_with_stock)
     rehearse_upgrade(clean_with_stock)
@@ -271,13 +255,13 @@ def rehearse_upgrade(clean):
             baseline = Path(path) / "apps/haxpower_v1"
             deploy_app(fixture=baseline)
             version = run(PYTHON, "-c", "import haxpower_v1; print(haxpower_v1.__version__)", capture=True)
-            require(version.strip() == "0.13.0", "expected the merged V1-12 app")
+            require(version.strip() == "0.14.0", "expected the merged V1-13 app")
             site_command("migrate", target=UPGRADE)
             baseline_empty = inspect("snapshot", UPGRADE)
             verify_upgraded(baseline_empty, previous)
             verify_sku_schema(baseline_empty)
             verify_warehouse_schema(baseline_empty)
-            verify_access_schema(baseline_empty)
+            verify_access_schema(baseline_empty, role_count=12)
             verify_batch_schema(baseline_empty)
             verify_stock_schema(baseline_empty)
             inspect("seed-catalog", UPGRADE)
@@ -292,7 +276,7 @@ def rehearse_upgrade(clean):
                     and len(seeded["warehouse"]["native_leaves"]) == 9
                     and len(seeded["access"]["assignments"]) == 2
                     and len(seeded["batch"]["rows"]) == len(seeded["batch"]["native"]) == 5,
-                    "unexpected merged V1-12 synthetic state")
+                    "unexpected merged V1-13 synthetic state")
             inspect("sku-concurrency", UPGRADE)
             inspect("stock-execution", UPGRADE)
             inspect("receipt-execution", UPGRADE)
@@ -301,10 +285,12 @@ def rehearse_upgrade(clean):
             inspect("settle-transfer-history", UPGRADE)
             inspect("stock-count", UPGRADE)
             inspect("count-recovery-prepare", UPGRADE)
+            inspect("correction-baseline", UPGRADE)
+            inspect("approval-recovery-prepare", UPGRADE)
             baseline_state = inspect("snapshot", UPGRADE)
-            record("merged V1-12 with native movements, count tasks and inventory versions", baseline_state)
+            record("merged V1-13 with native movements, counts and approval history", baseline_state)
             def failed_upgrade(state):
-                verify_approval_upgrade(state, baseline_state, failed=True)
+                verify_correction_upgrade(state, baseline_state, failed=True)
             rehearse_failure(baseline, baseline_state, failed_upgrade)
         finally:
             deploy_app()
@@ -316,8 +302,9 @@ def run_upgraded_rehearsal(clean, baseline_state):
     check_bench()
     site_command("migrate", target=UPGRADE)
     upgraded = inspect("snapshot", UPGRADE)
-    verify_approval_upgrade(upgraded, baseline_state)
-    record("V1-13 upgraded from merged V1-12; native facts and inventory versions preserved", upgraded)
+    verify_correction_upgrade(upgraded, baseline_state)
+    record("V1-14 upgraded from merged V1-13; native facts, versions and approvals preserved", upgraded)
+    inspect("approval-recovery-finish", UPGRADE)
     inspect("verify-inventory-versions", UPGRADE)
     inspect("verify-skus", UPGRADE)
     inspect("verify-access", UPGRADE)
@@ -338,7 +325,7 @@ def run_upgraded_rehearsal(clean, baseline_state):
     inspect("stock-count-native", UPGRADE)
     # The extended probe rotates the site's generation. Run it after the
     # restored V1-12 Draft has proved continuity with its original snapshot.
-    inspect("approval-recovery-prepare", UPGRADE)
+    inspect("correction-recovery-prepare", UPGRADE)
     populated = inspect("snapshot", UPGRADE)
     record("upgraded site with synthetic domain data and warehouse grants", populated)
     repeat_migration(UPGRADE, populated)
@@ -354,7 +341,7 @@ def run_upgraded_rehearsal(clean, baseline_state):
 
 
 def verify_recovered_stock(clean):
-    inspect("approval-recovery-finish", UPGRADE)
+    inspect("correction-recovery-finish", UPGRADE)
     inspect("count-recovery-finish", UPGRADE)
     inspect("verify-skus", UPGRADE)
     inspect("verify-access", UPGRADE)

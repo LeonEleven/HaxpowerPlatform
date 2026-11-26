@@ -224,13 +224,13 @@ def lock_dispatch_submission(document, command):
     return submission
 
 
-def _lock_document(company, document_id):
+def _lock_document(company, document_id, *, specialist=False):
     document = stock.current(stock.DOCUMENT, document_id, (
         "name", "company", "owner", "document_type", "revision", "status", "effective_operation",
         "approval_submission", "reason", "notes",
     ))
     if (not document or document.name != document_id or document.company != company
-            or document.document_type not in rules.PRIMARY):
+            or document.document_type not in ({rules.CORRECTION} if specialist else rules.PRIMARY)):
         policy.deny()
     return document
 
@@ -364,18 +364,27 @@ class _RolledBackApproval(Exception):
         self.code = code
 
 
-def _decision_stage(database, payload, verb, *, recovery, failed=None):
+def _decision_stage(database, payload, verb, *, recovery, failed=None, specialist=False):
     lock_stock_writes(payload.company)
     actor = policy.active_actor(locked=True)
     if verb != "Withdraw":
-        policy.require_operation(policy.Operation.APPROVE, locked=True)
-    identity = kernel._digest((payload.company, actor, verb, payload.idempotency_key))
+        policy.require_operation(
+            policy.Operation.CORRECTION_APPROVE if specialist else policy.Operation.APPROVE, locked=True,
+        )
+    action_key = f"Correction {verb}" if specialist else verb
+    identity = kernel._digest((payload.company, actor, action_key, payload.idempotency_key))
     digest = kernel._digest(asdict(payload))
     request = store.request(identity)
-    document = _lock_document(payload.company, request.document_id if request else payload.document_id)
+    document = _lock_document(payload.company, request.document_id if request else payload.document_id,
+                              specialist=specialist)
     submission = store.submission(request.submission_id if request else payload.submission_id)
     _belongs(submission, document)
-    _authorize_decision(verb, actor, document, submission)
+    if specialist:
+        from ..inventory.corrections import service as corrections
+
+        corrections._authorize_decision(verb, actor, document, submission)
+    else:
+        _authorize_decision(verb, actor, document, submission)
     if request:
         return store.replay(request, digest), False
     if recovery:
@@ -388,9 +397,19 @@ def _decision_stage(database, payload, verb, *, recovery, failed=None):
     if failed:
         # This transaction follows the closed, rolled-back quantity attempt.
         # Recheck the original operator as well as the decision maker.
-        with _posting_principal(submission):
-            policy.require_operation(_operation(document.document_type), locked=True)
-            authorize_snapshot(submission)
+        if specialist:
+            review, _ = corrections._approved_effect(database, submission, document, actor, identity,
+                                                      failed=failed, reason=payload.reason)
+            if review:
+                _set_state(document, review, submission.name)
+                store.event(submission, "Manual Review", before, review, actor, identity,
+                            reason=payload.reason, failure_code=failed)
+                store.save_request(identity, document.company, actor, document.name, submission.name, verb, digest, review)
+                return review, True
+        else:
+            with _posting_principal(submission):
+                policy.require_operation(_operation(document.document_type), locked=True)
+                authorize_snapshot(submission)
         result = Result(document.name, None, document.revision, document.status, submission.name)
         store.event(submission, "Approval Failed", before, result, actor, identity, reason=payload.reason,
                     failure_code=failed)
@@ -401,12 +420,17 @@ def _decision_stage(database, payload, verb, *, recovery, failed=None):
     try:
         native_actor = None
         if verb == "Approve":
-            result, native_actor = _approve(database, submission, document, actor, identity)
+            if specialist:
+                result, native_actor = corrections._approved_effect(database, submission, document, actor, identity,
+                                                                      reason=payload.reason)
+            else:
+                result, native_actor = _approve(database, submission, document, actor, identity)
         else:
             result = Result(document.name, None, document.revision + 1, after, submission.name)
         if result.operation_id is None:
             _set_state(document, result, submission.name)
-        store.event(submission, verb, before, result, actor, identity, reason=payload.reason,
+        event = "Manual Review" if specialist and result.status == corrections.MANUAL else verb
+        store.event(submission, event, before, result, actor, identity, reason=payload.reason,
                     native_actor=native_actor)
         store.save_request(identity, document.company, actor, document.name, submission.name, verb, digest, result)
         return result, True
@@ -418,10 +442,11 @@ def _decision_stage(database, payload, verb, *, recovery, failed=None):
         if verb != "Approve":
             raise
         code = getattr(error, "code", None)
-        raise _RolledBackApproval(code if code in SAFE_FAILURES else "APPROVAL_EXECUTION_FAILED") from None
+        safe = SAFE_FAILURES | corrections.REVIEW_FAILURES if specialist else SAFE_FAILURES
+        raise _RolledBackApproval(code if code in safe else "APPROVAL_EXECUTION_FAILED") from None
 
 
-def _decide(payload, verb, *, before_guard=None, commit=None):
+def _decide(payload, verb, *, before_guard=None, commit=None, specialist=False):
     kernel._text(payload.company, 140, required=True)
     kernel._id(payload.document_id)
     kernel._id(payload.submission_id)
@@ -429,7 +454,7 @@ def _decide(payload, verb, *, before_guard=None, commit=None):
     _reason(payload.reason, verb in ("Reject", "Revoke Approval"))
     if not isinstance(payload.idempotency_key, str) or not KEY.fullmatch(payload.idempotency_key):
         raise StockError("STOCK_INVALID_REQUEST_KEY")
-    stage = partial(_decision_stage, payload=payload, verb=verb)
+    stage = partial(_decision_stage, payload=payload, verb=verb, specialist=specialist)
     try:
         return kernel._run(stage, read_committed=True, before_guard=before_guard, commit=commit,
                            passthrough=(_RolledBackApproval,))

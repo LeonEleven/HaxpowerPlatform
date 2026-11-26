@@ -491,10 +491,11 @@ def _historical(index):
 
     with connection():
         doc = frappe.db.get_value(store.DOCUMENT, {"reason": f"{UPGRADE_MARKER} {index}"},
-                                  ("name", "company", "owner", "reason", "notes"), as_dict=True)
+                                  ("name", "company", "owner", "reason", "notes", "effective_operation"), as_dict=True)
         _, lines = _lock_document(doc.company, doc.name, stock.TRANSFER)
+        revision = frappe.db.get_value(store.LOG, doc.effective_operation, "result_revision")
     draft = dto.TransferDraft(
-        doc.company, doc.name, 1, tuple(
+        doc.company, doc.name, revision - 1, tuple(
             dto.TransferLine(line.sku_id, line.source, line.target, batch_input(line), line.quantity,
                              line.uom, line.reason, line.notes, line.line_id)
             for line in sorted(lines, key=lambda line: line.line_no)
@@ -509,18 +510,19 @@ def settle_history(*, recovered=False):
         company, document = command.draft.company, command.draft.transfer_id
         with actor_session(actor, company), service.synthetic_candidate(company, limits=LIMITS):
             start = service.get_dispatch(company, document)
-            replay = dto.DispatchResult(start.transfer_id, start.operation_id, transit.IN_TRANSIT, 2)
+            revision = command.draft.revision + 1
+            replay = dto.DispatchResult(start.transfer_id, start.operation_id, transit.IN_TRANSIT, revision)
             _assert_replay(lambda: service.dispatch(command), replay)
             if not recovered:
-                require(start.status == transit.IN_TRANSIT and start.revision == 2, "upgrade altered historical dispatch")
+                require(start.status == transit.IN_TRANSIT and start.revision == revision, "upgrade altered historical dispatch")
                 start, _, _ = act(start, (0, "6"))
             else:
-                require(start.status == transit.PARTIAL and start.revision == 3, "restore lost open settlement history")
+                require(start.status == transit.PARTIAL and start.revision == revision + 1, "restore lost open settlement history")
             if index == 1 or recovered:
                 start, _, _ = act(start, (0, "4"), action=stock.RETURN)
                 require(start.status == transit.CLOSED_RETURN, "V1-10 dispatch did not close after restore/upgrade")
             _assert_replay(lambda: service.dispatch(command), replay)
-    print("Reconciled V1-10 historic dispatches, genuine partial receipts and returns, and original-request replay.", flush=True)
+    print("Reconciled historic dispatches, genuine partial receipts and returns, and original-request replay.", flush=True)
 
 
 def period_and_freeze(actor, company, original):
@@ -658,6 +660,6 @@ def continue_v112_history(*, recovered=False):
             require(Decimal(start.lines[0].remaining_quantity) == 4, 'V1-11 fixture lost its four units in transit')
             start, _, _ = act(start, (0, '1'))
             require(Decimal(start.lines[0].remaining_quantity) == 3, 'upgraded transfer did not retain remaining transit')
-        replay=dto.DispatchResult(start.transfer_id,start.operation_id,transit.IN_TRANSIT,2)
+        replay=dto.DispatchResult(start.transfer_id,start.operation_id,transit.IN_TRANSIT,command.draft.revision+1)
         _assert_replay(lambda:service.dispatch(command),replay)
-    print('V1-12 continued V1-11 partial transfer and replayed historical dispatch.',flush=True)
+    print('Continued the baseline partial transfer and replayed its historical dispatch.',flush=True)

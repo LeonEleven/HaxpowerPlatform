@@ -533,18 +533,22 @@ def verify_persisted():
     for req in requests:
         log, = rows(state, store.LOG, name=req.result_operation)
         document, = rows(state, store.DOCUMENT, name=req.document_id)
-        dispatch = log.original_operation or log.name
+        correction = log.action == "Correct Effective Inventory"
+        dispatch = (log.original_operation or log.name) if not correction else log.name
         require(req.status == "Completed" and len(req.payload_digest) == 64
                 and req.result_revision == log.result_revision and req.company == document.company
                 and dispatch == document.effective_operation
                 and (log.request_id, log.document_id, log.actor, log.action, log.status)
                 == (req.name, document.name, req.actor, req.command, "Effective"),
                 "persisted operation or request identity drift")
-        if log.original_operation:
+        if log.original_operation and not correction:
             require(document.document_type == "Material Transfer" and log.action in ("Receive Transfer", "Return Transfer")
                     and log.effect_key == req.name and log.get("result_status"),
                     "persisted transfer follow-up lost effect or original dispatch identity")
         else:
+            if correction:
+                require(log.original_operation and document.document_type == log.action,
+                        "correction lost its original operation")
             revision = _first_effect_revision(document, log, submissions, events)
             require(log.effect_key == "APPLY" and log.result_revision == revision,
                 "original operation identity drift")

@@ -292,7 +292,7 @@ def _reserve_request(command, action, actor, request_id, key_digest, digest):
                  payload_digest=digest, document_id=command.document_id, status="Pending")
 
 
-def _apply(database, command, document, stored_lines, locations, action):
+def _apply(database, command, document, stored_lines, locations, action, *, verified_versions=None):
     continuation = action.prepare_continuation(command, document, stored_lines, locations) if action.prepare_continuation else None
     if continuation:
         command, locations = continuation.command, continuation.locations
@@ -302,7 +302,7 @@ def _apply(database, command, document, stored_lines, locations, action):
         _validate_payload(command, document, stored_lines, action)
 
     from .. import versions
-    before_versions = versions.verify()
+    before_versions = versions.verify() if verified_versions is None else verified_versions
     with adapter_transaction(database, native_orm=action.native_orm):
         resolved = action.resolve_batches(command, skus) if action.resolve_batches else command
         if action.bind_batches_on_draft and any(
@@ -344,6 +344,8 @@ def _record(document, action, applied, request_id, actor, native_actor, submissi
 def _stage(database, command, action, *, recovery, transfer_submission=False):
     from ...approval import service as approval
 
+    if action.name == approval_policy.CORRECTION or action.document_type == approval_policy.CORRECTION:
+        raise StockError("CORRECTION_SPECIALIST_APPROVAL_REQUIRED")
     lock_stock_writes(command.company)
     actor = policy.active_actor(locked=True)
     policy.require_operation(action.operation, locked=True)

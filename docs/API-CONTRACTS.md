@@ -222,3 +222,9 @@ SKU、单位、批次、库位和原生记录由原发出证据确定。输入�
 create 只接收范围选择与备注；快照数量、时间、代次和版本由服务器生成。LOCATION 不接受 SKU/批次，SKU 不接受批次，BUCKET 要求明确选择。record 只接受稳定行 ID、十进制实盘字符串及备注；NULL 不代表零。discover 不扩大范围，不创建 SKU；复用 V1-06 受控批次服务。recount 追加任务并保留旧数据，不复制实盘。
 
 complete 携带任务投影（含期望 revision、原快照身份和稳定行）、幂等键及必要原因。规范摘要涵盖当前主体、公司、范围、快照、代次、逐行确认/发现身份与规范数量。返回稳定单据 ID、完成操作、状态 Completed 和新 revision。范围、桶、代次改变分别报 COUNT_SCOPE_CHANGED / COUNT_BUCKET_CHANGED / COUNT_GENERATION_CHANGED；实盘遗漏报 COUNT_ACTUAL_INCOMPLETE。失败无数量或版本残留；历史成功重放先重新授权。
+
+### V1-14 服务契约
+
+`inventory.corrections.service` 提供 `eligibility`、`save_draft`、`submit`、`approve`、`reject`、`withdraw`、`record_review`、`reject_review`、`close_review`、`link_replacement` 和 `history`。申请行只接收原行 ID、数量字符串、原因和备注，服务端确定库存维度和反向方向。变更状态需要 revision，提交、审批及审核使用幂等键。人工审核记录危险依赖并阻断数量执行。获批后同键重放返回原结果。
+
+`inventory.operations.trace.by_document` 和 `detail` 提供面向 V1-15 的受控读取。原行详情可查询原生关系令牌、按域维度的数量变动、部分纠错关联和剩余额度。DTO 保持领域 ID 及无批次语义。生产数量写入与完整查询分页、报表和导出遵循各自验收计划。

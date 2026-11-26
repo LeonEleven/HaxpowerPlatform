@@ -223,3 +223,7 @@ V1-09 沿用 V1-08 表结构。升级验收比较应用迁移前后的合成历�
 发现桶证据。`HP V1 Approval Event` 追加状态事件及批准失败，关联实际操作和原生身份。
 `HP V1 Approval Request` 保存非数量动作的幂等结果；库存事实继续关联原有的库存请求与操作日志。
 业务单保存当前提交 ID，迁移仅添加可空字段，对 V1-12 已完成记录保留原身份和原请求。
+
+### V1-14 纠错关系及长期留存
+
+纠错使用 Stock Document 和 Stock Document Line 保存请求内容。Stock Correction 共享业务单 ID，保存原操作、纠错行与原行映射及正常后续业务引用。不可变 Approval Submission 固化每次提交的关系、依据及专项政策。Correction Review 追加人工审核证据、意见、关闭信息和合法业务引用。Operation Log 和 Operation Native Link 连回原生调整，额度由有效原生事实复核。保护正式单据、盘点、审批、请求、审计和正式附件的长期留存，无自动删除任务或短期重放 TTL。

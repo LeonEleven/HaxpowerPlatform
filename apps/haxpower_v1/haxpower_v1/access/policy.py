@@ -24,6 +24,7 @@ class Operation(StrEnum):
     TRANSFER = "Transfer"
     COUNT = "Count"
     APPROVE = "Approve"
+    CORRECTION_APPROVE = "Correction Approve"
     EXPORT = "Export"
     SYSTEM_MAINTAIN = "System Maintain"
 

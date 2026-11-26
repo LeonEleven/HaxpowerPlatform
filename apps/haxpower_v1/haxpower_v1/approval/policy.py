@@ -4,6 +4,7 @@ RECEIPT = "Material Receipt"
 ISSUE = "Material Issue"
 TRANSFER = "Material Transfer"
 COUNT = "Stock Count"
+CORRECTION = "Correct Effective Inventory"
 PRIMARY = frozenset((RECEIPT, ISSUE, TRANSFER, COUNT))
 
 PENDING = "Pending Approval"
@@ -23,6 +24,6 @@ def requirement(action):
         "Submit": ORDINARY_SUBMISSION,
         "Receive Transfer": NO_REPEAT,
         "Return Transfer": NO_REPEAT,
-        "Correct Effective Inventory": CORRECTION_APPROVAL,
+        CORRECTION: CORRECTION_APPROVAL,
         "Post Opening Inventory": OPENING_SIGNOFF,
     }[action]

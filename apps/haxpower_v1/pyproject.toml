@@ -4,7 +4,7 @@ build-backend = "flit_core.buildapi"
 
 [project]
 name = "haxpower_v1"
-version = "0.14.0"
+version = "0.15.0"
 description = "HaxpowerPlatform V1 Frappe application"
 requires-python = ">=3.14,<3.15"
 authors = [{name = "HaxpowerPlatform"}]

@@ -53,6 +53,10 @@ def site_command(*args, target=SITE, capture=False, expect_failure=False):
         command = [PYTHON, "/opt/hp-v1/bench.py", "secret-command", target]
         cwd = SITES
         data = json.dumps(args)
+    elif args == ("run-tests", "--app", "haxpower_v1") and PROJECT.startswith("haxpower-v1-ci-"):
+        command = [PYTHON, "/opt/hp-v1/bench.py", "test-command", target]
+        cwd = SITES
+        data = None
     else:
         command = ["bench", "--site", target, *args]
         cwd = BENCH
@@ -91,6 +95,25 @@ def secret_command(target):
     sys.argv = ["bench", "frappe", "--site", target, *[
         SECRET_MARKERS[arg].read_text().strip() if arg in SECRET_MARKERS else arg for arg in args
     ]]
+    main()
+
+
+def test_command(target):
+    import frappe
+    from frappe.utils.bench_helper import main
+
+    require(PROJECT.startswith("haxpower-v1-ci-") and check_targets(target), "unexpected regression test site")
+    get_config = frappe.get_site_config
+
+    def fixture_config(*args, **kwargs):
+        config = get_config(*args, **kwargs)
+        # Repeated real upgrade and recovery probes create distinct synthetic users.
+        # The higher fixture budget exists only in this CLI process.
+        config.throttle_user_limit = 256
+        return config
+
+    frappe.get_site_config = fixture_config
+    sys.argv = ["bench", "frappe", "--site", target, "run-tests", "--app", "haxpower_v1"]
     main()
 
 
@@ -282,6 +305,9 @@ def main(action):
     require(os.environ["HP_V1_SITE"] == SITE and os.environ["HP_V1_DB"] == DATABASE, "unexpected site identity")
     if action == "secret-command":
         secret_command(sys.argv[2])
+        return
+    if action == "test-command":
+        test_command(sys.argv[2])
         return
     if action == "namespace":
         if (SITES / "common_site_config.json").is_file():

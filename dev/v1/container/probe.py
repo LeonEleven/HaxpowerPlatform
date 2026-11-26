@@ -84,6 +84,13 @@ def snapshot():
                 "schema": frappe.db.sql(f"SHOW CREATE TABLE `tab{doctype}`")[0][1],
                 "rows": frappe.get_all(doctype, fields=["*"], order_by="name"),
             }
+    corrections = {}
+    for table in ("HP V1 Stock Correction", "HP V1 Correction Review"):
+        if frappe.db.table_exists(table):
+            corrections[table] = {
+                "schema": frappe.db.sql(f"SHOW CREATE TABLE `tab{table}`")[0][1],
+                "rows": frappe.get_all(table, fields=["*"], order_by="name"),
+            }
     posted = {table: frappe.get_all(table, fields=["*"], order_by="name") for table in (
         "Stock Entry", "Stock Entry Detail", "Serial and Batch Bundle", "Serial and Batch Entry",
         "Stock Ledger Entry", "Bin", "GL Entry", "Payment Ledger Entry", "Repost Item Valuation",
@@ -91,7 +98,7 @@ def snapshot():
     )}
     return {"access": access, "approval": approval, "batch": batch, "operations": operations, "schema": schema, "rows": rows,
             "patches": logs, "catalog": catalog, "sku": sku,
-            "warehouse": warehouse, "posted": posted, "inventory": inventory}
+            "warehouse": warehouse, "posted": posted, "inventory": inventory, "corrections": corrections}
 
 
 def main(action, site):
@@ -204,6 +211,17 @@ def main(action, site):
             from approval_probe import recovery_finish, recovery_prepare, run
 
             if action == "approval":
+                run(site)
+            else:
+                (recovery_prepare if action.endswith("prepare") else recovery_finish)()
+        elif action == "correction-baseline":
+            from approval_probe import correction_baseline
+
+            correction_baseline()
+        elif action in {"stock-correction", "correction-recovery-prepare", "correction-recovery-finish"}:
+            from correction_probe import recovery_finish, recovery_prepare, run
+
+            if action == "stock-correction":
                 run(site)
             else:
                 (recovery_prepare if action.endswith("prepare") else recovery_finish)()

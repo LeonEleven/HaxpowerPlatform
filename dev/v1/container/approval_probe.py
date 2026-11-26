@@ -756,3 +756,19 @@ def recovery_finish():
         settings = service.get_settings()
         service.configure(False, settings.revision, "End synthetic recovery")
     print("Restored approval settings, pending receipt, approved transfer and stale count were revalidated.", flush=True)
+
+
+
+def correction_baseline():
+    """Seed independent V1-13 originals with and without a later count."""
+    f = Fixture()
+    with f.operate():
+        command = f.receipt_command("6", sku=f.brand)
+        draft = receipts.revise_draft(command.draft, notes="Synthetic V1-14 prior release")
+        require(receipts.submit(replace(command, draft=draft)).status == "Effective",
+                "V1-13 upgrade original did not post")
+        command = f.receipt_command("6")
+        draft = receipts.revise_draft(command.draft, notes="Synthetic V1-14 prior release counted")
+        require(receipts.submit(replace(command, draft=draft)).status == "Effective",
+                "V1-13 downstream-count original did not post")
+        require(finish(f.count_task()).status == "Completed", "V1-13 no-difference count did not finish")
