@@ -77,7 +77,10 @@ class Fixture(ApprovalFixture):
         with self.specialist_session(actor):
             approved = service.approve(decision)
             require(service.approve(decision) == approved, "correction approval replay changed its response")
-            require(approved.status == status, "unexpected correction approval result")
+            if approved.status != status:
+                history = service.history(self.company, result.document_id)
+                codes = sorted({row["code"] for review in history["reviews"] for row in review["evidence"]})
+                require(False, f"expected correction status {status}, observed {approved.status} {codes}")
             expect("APPROVAL_STATE_CONFLICT", lambda: service.approve(replace(decision, idempotency_key=uuid4().hex)))
             if blocked_code:
                 history = service.history(self.company, result.document_id)

@@ -261,7 +261,7 @@ def _completed_corrections(company, original, originals, by_line):
             "company", "document_id", "command", "status", "actor", "result_operation", "result_revision",
         )) != (company, row.name, rules.CORRECTION, "Completed", row.actor, row.effective_operation, row.revision):
             raise StockError(INVALID)
-        if event != [(company, row.name, row.revision, row.actor, row.native_actor)] or (
+        if tuple(event) != ((company, row.name, row.revision, row.actor, row.native_actor),) or (
             row.native_actor != snapshot.submitter or snapshot.business_revision + 2 != row.revision
         ):
             raise StockError(INVALID)
