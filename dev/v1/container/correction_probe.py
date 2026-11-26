@@ -71,8 +71,8 @@ class Fixture(ApprovalFixture):
     def original_rows(self, operation):
         return [line["line_id"] for line in trace.detail(self.company, operation)["lines"]]
 
-    def check(self, result, status="Effective", *, actor=None, blocked_code=None, applicant=None):
-        decision = self.decision(result)
+    def check(self, result, status="Effective", *, actor=None, blocked_code=None, applicant=None, decision=None):
+        decision = decision or self.decision(result)
         before = current_state()
         with self.specialist_session(actor):
             approved = service.approve(decision)
@@ -348,16 +348,18 @@ def run(site):
 def recovery_prepare():
     f = Fixture()
     f.toggle(False)
-    with f.operate():
-        old = frappe.db.get_value(stock.DOCUMENT, {"notes": BASELINE}, ("effective_operation",), as_dict=True)
-        require(old and old.effective_operation, "missing real V1-13 upgrade original")
-        historical = SimpleNamespace(operation_id=old.effective_operation)
-        # Preserve its current owner and SLE identities while correcting it
-        # as another authorized employee.
-    f.check(f.submit(historical, ("1",)))
+    for notes, outcome, blocker in ((BASELINE, "Effective", None),
+                                    (BASELINE + " counted", service.MANUAL, facts.RECOUNT)):
+        with f.operate():
+            original_id = frappe.db.get_value(stock.DOCUMENT, {"notes": notes}, "effective_operation")
+            require(original_id, "missing real V1-13 upgrade original")
+        # A different authorized employee submits both historical requests.
+        f.check(f.submit(SimpleNamespace(operation_id=original_id), ("1",)), outcome, blocked_code=blocker)
     with f.operate():
         original = receipts.submit(f.receipt_command("8"))
-    f.check(f.submit(original, ("2",), reason=MARKER + " effective"))
+    submitted = f.submit(original, ("2",), reason=MARKER + " effective")
+    f.check(submitted, decision=_restore_replay(f.company, submitted.document_id, submitted.revision,
+                                               submitted.submission_id))
     f.submit(original, ("3",), reason=MARKER + " pending")
     with f.operate():
         receipts.submit(f.receipt_command("1", sku=f.brand))
@@ -372,12 +374,22 @@ def recovery_finish():
                 ("name", "company", "owner", "revision", "approval_submission", "status"), as_dict=True)
             for status in ("effective", "pending", "manual")}
     doc = rows["pending"]
+    effective = rows["effective"]
     scopes = [row.id for row in warehouses.list_warehouses(company=doc.company)[:2]]
     approver = synthetic_user(uuid4().hex[:10], "restored-specialist", Operation.CORRECTION_APPROVE)[0]
     set_scope(approver, doc.company, Mode.SELECTED, scopes)
     frappe.db.commit()
+    with actor_session(approver, doc.company):
+        original = service.history(doc.company, effective.name)
+        prior_actor, = [event.actor for event in original["events"] if event.action == "Approve"]
+    with actor_session(prior_actor, doc.company):
+        before = current_state()
+        original_decision = _restore_replay(doc.company, effective.name, effective.revision - 1,
+                                            effective.approval_submission)
+        previous = service.approve(original_decision)
+        require(previous.operation_id == original["operation_id"] and current_state() == before,
+                "restore did not replay the original specialist request without writes")
     with actor_session(approver, doc.company), service.synthetic_candidate(doc.company, limits=LIMITS):
-        original = service.history(doc.company, rows["effective"].name)
         manual = service.history(doc.company, rows["manual"].name)
         require(manual["status"] == service.MANUAL and bool(manual["reviews"]), "manual review missing after recovery")
         decision = approval.Decision(doc.company, doc.name, doc.approval_submission, doc.revision, uuid4().hex)
@@ -388,3 +400,9 @@ def recovery_finish():
         require([Decimal(row["remaining"]) for row in entitlement["lines"].values()] == [3],
                 "restore reset or duplicated cumulative correction quantity")
     print("V1-14 restored effective, pending and manual cases and continued the original partial entitlement.", flush=True)
+
+
+def _restore_replay(company, document_id, revision, submission_id):
+    # A stable input for the synthetic recovery probe, independent of DB state.
+    return approval.Decision(company, document_id, submission_id, revision, f"recovery-{document_id}",
+                             "Synthetic recovery specialist decision")

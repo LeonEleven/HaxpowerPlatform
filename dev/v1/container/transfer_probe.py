@@ -555,12 +555,13 @@ def followup_fixture():
 
 
 def seed_history():
-    # Use the legacy two-phase DTOs from the pinned V1-12 baseline.
+    # Use the installed baseline's dispatch entry point and persist its replay key.
     actor, company, _, sample = followup_fixture()
     seed_receipts(company, actor, (replace(sample, quantity="20"),))
     with actor_session(actor, company), service.synthetic_candidate(company, limits=LIMITS):
         for index in (1, 2):
             reason = f"{UPGRADE_MARKER} {index}"
             draft = service.create_draft(TransferDraftInput(company, (sample,), reason, "Original V1-10 notes"))
-            post(DispatchTransfer(draft, f"v111-upgrade-dispatch-{index}"))
+            dispatch = dispatch_command(draft)
+            post(replace(dispatch, idempotency_key=f"v111-upgrade-dispatch-{index}"))
     print("Persisted two real baseline dispatches before changing App revision.", flush=True)
