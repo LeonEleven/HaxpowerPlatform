@@ -12,12 +12,14 @@ import frappe
 from haxpower_v1.access.config import set_scope
 from haxpower_v1.access.policy import Mode, Operation
 from haxpower_v1.adapters.erpnext import receipt as native_receipt
+from haxpower_v1.approval import persistence as approvals
 from haxpower_v1.approval import service as approval
 from haxpower_v1.approval.policy import PENDING
 from haxpower_v1.inventory import versions
 from haxpower_v1.inventory.corrections import TABLES as CORRECTION_TABLES
 from haxpower_v1.inventory.corrections import service, facts
 from haxpower_v1.inventory.issue import service as issues
+from haxpower_v1.inventory.issue.dto import IssueDraftInput, IssueLineInput, SubmitIssue
 from haxpower_v1.inventory.operations import persistence as stock, trace
 from haxpower_v1.inventory.operations.dto import StockError
 from haxpower_v1.inventory.operations.transaction import connection
@@ -31,6 +33,7 @@ from approval_probe import Fixture as ApprovalFixture, current_state, no_quantit
 from count_probe import actual, create, finish
 from identity import require
 from receipt_probe import LIMITS
+from sku_probe import PREFIX
 from haxpower_v1.inventory.receipt.dto import ReceiptDraftInput
 from stock_probe import actor_session, expect
 
@@ -77,6 +80,7 @@ class Fixture(ApprovalFixture):
         with self.specialist_session(actor):
             approved = service.approve(decision)
             require(service.approve(decision) == approved, "correction approval replay changed its response")
+            expect("STOCK_IDEMPOTENCY_CONFLICT", lambda: service.approve(replace(decision, reason="Changed decision")))
             if approved.status != status:
                 history = service.history(self.company, result.document_id)
                 codes = sorted({row["code"] for review in history["reviews"] for row in review["evidence"]})
@@ -87,9 +91,17 @@ class Fixture(ApprovalFixture):
                 require(blocked_code in {reason["code"] for reason in history["reviews"][0]["evidence"]},
                         f"manual review evidence missing {blocked_code}")
         if status == "Effective":
-            read_state(approved, before, "Correct Effective Inventory", "Stock Entry",
-                       SimpleNamespace(operator=applicant or self.operator, company=self.company),
-                       actor=actor or self.specialist)
+            after = read_state(approved, before, "Correct Effective Inventory", "Stock Entry",
+                               SimpleNamespace(operator=applicant or self.operator, company=self.company),
+                               actor=actor or self.specialist)
+            for table, fields in (
+                ("Stock Ledger Entry", ("actual_qty", "serial_and_batch_bundle", "voucher_detail_no", "docstatus", "is_cancelled")),
+                ("Serial and Batch Entry", ("qty", "batch_no", "warehouse", "docstatus", "is_cancelled")),
+                (stock.LOG, ("document_id", "request_id", "result_revision")),
+            ):
+                prior = {row.name: tuple(row[field] for field in fields) for row in before[table]}
+                unchanged = {row.name: tuple(row[field] for field in fields) for row in after[table] if row.name in prior}
+                require(unchanged == prior, f"correction changed previously committed quantity evidence in {table}")
         else:
             no_quantity(before)
         return approved
@@ -169,24 +181,34 @@ def blocked_cases(f):
         original = receipts.submit(f.receipt_command("2"))
         task = f.count_task()
         before = current_state()
-        finish(task)
+        no_difference = finish(task)
         after = current_state()
         require(before["Stock Ledger Entry"] == after["Stock Ledger Entry"], "test count was not no-difference")
+        original_line, = f.original_rows(no_difference.operation_id)
+        expect("CORRECTION_NO_QUANTITY_EFFECT", lambda: service.save_draft(
+            f.company, no_difference.operation_id, (service.Adjustment(original_line, "1"),),
+            "No quantity adjustment in the original count",
+        ))
     f.check(f.submit(original, ("1",)), service.MANUAL, blocked_code=facts.RECOUNT)
 
     with f.operate():
         original = receipts.submit(f.receipt_command("3"))
         # Global approval is disabled during this probe; dispatch retains its
         # explicit second step.
-        from haxpower_v1.inventory.transfer.dto import DispatchTransfer, ReturnTransfer, TransferQuantity
-        command = f.transfer_command("1")
+        from haxpower_v1.inventory.transfer.dto import DispatchTransfer, ReceiveTransfer, ReturnTransfer, TransferQuantity
+        command = f.transfer_command("2")
         staged = transfers.submit(command)
         dispatched = transfers.dispatch(DispatchTransfer(replace(command.draft, revision=staged.revision), uuid4().hex))
         eligible = service.eligibility(f.company, dispatched.operation_id)
-        require(Decimal(eligible["transfer"][0]["remaining"]) == 1, "V1-11 remaining quantity was not traced")
+        line = (TransferQuantity(eligible["transfer"][0]["line_id"], "1"),)
+        received = transfers.receive(ReceiveTransfer(
+            f.company, dispatched.transfer_id, dispatched.revision, uuid4().hex, line,
+        ))
+        eligible = service.eligibility(f.company, dispatched.operation_id)
+        require(Decimal(eligible["transfer"][0]["remaining"]) == Decimal(eligible["transfer"][0]["received"]) == 1,
+                "V1-11 remaining and received quantities were not traced independently")
         returned = transfers.return_remaining(ReturnTransfer(
-            f.company, dispatched.transfer_id, dispatched.revision, uuid4().hex,
-            (TransferQuantity(eligible["transfer"][0]["line_id"], "1"),), "Synthetic ordinary transit return",
+            f.company, dispatched.transfer_id, received.revision, uuid4().hex, line, "Synthetic ordinary transit return",
         ))
         require(returned.status == "Closed with Return", "existing V1-11 return path changed")
     f.check(f.submit(original, ("1",)), service.MANUAL, blocked_code=facts.DOWNSTREAM)
@@ -243,6 +265,29 @@ def workflow(f):
         f.toggle(False)
 
 
+def rights(f):
+    with f.operate():
+        original = receipts.submit(f.receipt_command("2"))
+    pending = f.submit(original, ("1",))
+    decision = f.decision(pending)
+    for user in (f.operator, f.specialist):
+        before = current_state()
+        with actor_session("Administrator", f.company):
+            set_scope(user, f.company, Mode.NONE)
+            frappe.db.commit()
+        try:
+            with f.specialist_session():
+                expect("denied", lambda: service.approve(decision))
+        finally:
+            with actor_session("Administrator", f.company):
+                set_scope(user, f.company, Mode.SELECTED, f.warehouses)
+                frappe.db.commit()
+        no_quantity(before)
+    f.check(pending)
+    with actor_session(f.approver, f.company):
+        expect("denied", lambda: service.history(f.company, pending.document_id))
+
+
 def competing(site, f):
     with f.operate():
         original = receipts.submit(f.receipt_command("5"))
@@ -271,6 +316,34 @@ def competing(site, f):
     else:
         require(outcomes[0].status == service.MANUAL and outcomes[1].status == "Completed",
                 "completed no-difference count and same-bucket correction both took effect")
+
+    with f.operate():
+        batch = {"mode": "BATCH", "batchNo": "V114-RACE-" + uuid4().hex[:8]}
+        original = receipts.submit(f.receipt_command("5", batch=batch))
+        draw = issues.create_draft(IssueDraftInput(f.company, (
+            IssueLineInput(f.sku, f.source, batch, "4", PREFIX),
+        )))
+    pending = f.submit(original, ("4",))
+    outcomes = race(site, f, (
+        (f.specialist, lambda guard: approve(pending, guard)),
+        (f.operator, lambda guard: issues._submit(SubmitIssue(draw, uuid4().hex), before_guard=guard)),
+    ))
+    if outcomes[0].status == "Effective":
+        require(outcomes[1] == "INSUFFICIENT_STOCK", "correction and subsequent outflow overspent the bucket")
+    else:
+        require(outcomes[0].status == service.MANUAL and outcomes[1].status == "Effective",
+                "correction failed to recognize the competing downstream issue")
+
+    with f.operate():
+        original = receipts.submit(f.receipt_command("5"))
+    pending = f.submit(original, ("1",))
+    outcomes = race(site, f, (
+        (f.specialist, lambda guard: approve(pending, guard)),
+        (f.operator, lambda guard: approval._decide(f.decision(pending), "Withdraw", specialist=True, before_guard=guard)),
+    ))
+    winners = [result.status for result in outcomes if not isinstance(result, str)]
+    require(winners in (["Effective"], ["Draft"]) and "APPROVAL_STATE_CONFLICT" in outcomes,
+            "specialist approval and withdrawal did not produce one durable winner")
 
 
 def _protected_rows():
@@ -311,6 +384,24 @@ def failures(f):
             expect("STOCK_PERSISTENCE_FAILED", lambda: service.approve(f.decision(pending)))
         no_quantity(before)
 
+        event, save_request = approvals.event, approvals.save_request
+
+        def fail_event(*args, **kwargs):
+            event(*args, **kwargs)
+            if args[1] == "Approve":
+                raise StockError("STOCK_PERSISTENCE_FAILED")
+
+        def fail_result(*args, **kwargs):
+            save_request(*args, **kwargs)
+            if not kwargs.get("failure_code"):
+                raise StockError("STOCK_PERSISTENCE_FAILED")
+
+        for target, injected in (("event", fail_event), ("save_request", fail_result)):
+            before = current_state()
+            with patch.object(approvals, target, injected):
+                expect("STOCK_PERSISTENCE_FAILED", lambda: service.approve(f.decision(pending)))
+            no_quantity(before)
+
         def disconnected(database):
             database.close()
             raise OSError("synthetic disconnect before COMMIT")
@@ -335,6 +426,7 @@ def run(site):
     native_cases(f)
     blocked_cases(f)
     workflow(f)
+    rights(f)
     competing(site, f)
     failures(f)
     with f.operate(f.self_specialist):
