@@ -299,7 +299,7 @@ def assess(company, operation, header, lines, selected=None, *, native=None):
     if header.status != expected_status or header.revision != operation.result_revision or not operation.creation:
         raise StockError(INVALID)
     _verify_origin_request(company, operation, header)
-    baseline = stock.current(versions.EPOCH, "inventory", ("generation", "baseline_at"))
+    generation = versions.epoch()
     if native is None:
         before, entries = versions.verify(include_entries=True)
         allocations = _allocations(company, entries)
@@ -360,7 +360,7 @@ def assess(company, operation, header, lines, selected=None, *, native=None):
                                   "remaining": str(limit - used[identity]), "uom": uom,
                                   "corrections": sorted(op for op, _ in related[identity]),
                                   "native_sle": native_sles,
-                                  "generation": baseline.generation, "bucket_version": versions.read(
+                                  "generation": generation, "bucket_version": versions.read(
                                       bucket.company, bucket.location_id, "BUCKET", bucket.sku_id,
                                       bucket.batch_kind, bucket.batch_id),
                                   "fact_digest": before.get(bucket)}
@@ -371,10 +371,11 @@ def assess(company, operation, header, lines, selected=None, *, native=None):
                     reasons.append(_reason(ORDER, bucket=bucket, line_id=identity))
                 if any(metadata[sle][1] for sle in native_sles):
                     reasons.append(_reason("CORRECTION_VALUATION_UNSUPPORTED", bucket=bucket, line_id=identity))
-            if not baseline.baseline_at or operation.creation <= baseline.baseline_at:
-                reasons.append(_reason(ORDER, bucket=bucket, line_id=identity))
-            elif len({link.operation_id for link, _, _ in allocations[bucket]
-                      if link.creation and link.creation > baseline.baseline_at}) < evidence[identity]["bucket_version"]:
+            # V1-12 advances a bucket once per effective quantity operation.
+            # Pre-version history or a rebuilt baseline leaves uncounted native
+            # operations. The epoch's wall time can be in a different site
+            # time zone, so it cannot establish which effects came before it.
+            if len({link.operation_id for link, _, _ in allocations[bucket]}) != evidence[identity]["bucket_version"]:
                 reasons.append(_reason(ORDER, bucket=bucket, line_id=identity))
             for link, sle, _ in allocations[bucket]:
                 if link.operation_id == operation.name or (link.operation_id, link.line_id) in related[identity]:
