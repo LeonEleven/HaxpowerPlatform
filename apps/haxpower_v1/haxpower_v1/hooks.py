@@ -8,6 +8,7 @@ app_description = "HaxpowerPlatform V1"
 required_apps = ["erpnext"]
 
 auth_hooks = ["haxpower_v1.access.request.enforce_http_boundary"]
+after_request = ["haxpower_v1.access.request.protect_business_cache"]
 before_job = ["haxpower_v1.access.background.guard_queued_native_job"]
 
 after_install = [

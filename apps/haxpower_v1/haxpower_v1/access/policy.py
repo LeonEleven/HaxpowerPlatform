@@ -99,9 +99,13 @@ def _authorized_warehouses(*, company=None):
     }
 
 
-def authorized_warehouse_ids(operation: Operation, *, company=None):
+def authorized_warehouses(operation: Operation, *, company=None):
     require_operation(operation)
-    return tuple(_authorized_warehouses(company=company))
+    return _authorized_warehouses(company=company)
+
+
+def authorized_warehouse_ids(operation: Operation, *, company=None):
+    return tuple(authorized_warehouses(operation, company=company))
 
 
 def _record_id(value):

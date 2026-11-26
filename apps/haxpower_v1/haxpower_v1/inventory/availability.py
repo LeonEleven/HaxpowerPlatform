@@ -50,9 +50,9 @@ def resolve_existing_lines(command, skus):
     ))
 
 
-def _batch_totals(company, pairs, batch_items, bucket_totals):
+def _batch_totals(company, pairs, batch_items, bucket_totals, *, locked=True):
     """Corroborate the leaf projection and global Batch totals from submitted rows."""
-    native_totals = stock._batch_totals(batch_items)
+    native_totals = stock._batch_totals(batch_items, locked=locked)
     for batch, item in sorted(batch_items.items()):
         rows = frappe.db.sql(
             """
@@ -65,8 +65,7 @@ def _batch_totals(company, pairs, batch_items, bucket_totals):
               ON s.serial_and_batch_bundle = b.name AND s.docstatus = 1 AND s.is_cancelled = 0
             WHERE e.batch_no = %s AND e.docstatus = 1 AND e.is_cancelled = 0
               AND b.docstatus = 1 AND b.is_cancelled = 0
-            FOR UPDATE
-            """, (batch,),
+            """ + (" FOR UPDATE" if locked else ""), (batch,),
         )
         seen, by_leaf = set(), {}
         for (name, raw_qty, part_item, part_leaf, bundle_company, bundle_item, bundle_leaf, direction,
@@ -95,18 +94,18 @@ def _batch_totals(company, pairs, batch_items, bucket_totals):
     return native_totals
 
 
-def read_source(company, pairs, skus, *, posting_at=None):
+def read_source(company, pairs, skus, *, posting_at=None, locked=True):
     """Read and reconcile every batch in the source pairs in the caller's transaction."""
     pairs = set(pairs)
     scales = {sku.native_item: Decimal(1).scaleb(-sku.quantity_precision) for sku in skus}
     buckets, bins = stock._balances(
-        company, pairs, error=RECONCILIATION_FAILED, posting_at=posting_at, scales=scales,
+        company, pairs, error=RECONCILIATION_FAILED, posting_at=posting_at, scales=scales, locked=locked,
     )
     batch_items = {}
     for sku in skus:
         by_name = {}
-        for row in mappings({"sku": sku.name}, locked=True):
-            if native_batch.mapping_status(row, sku, locked=True) != MappingStatus.VERIFIED:
+        for row in mappings({"sku": sku.name}, locked=locked):
+            if native_batch.mapping_status(row, sku, locked=locked) != MappingStatus.VERIFIED:
                 raise StockError("BATCH_MAPPING_UNAVAILABLE")
             by_name[row.native_batch] = sku.native_item
         if any(batch not in by_name for item, _, batch in buckets if item == sku.native_item):
@@ -114,7 +113,7 @@ def read_source(company, pairs, skus, *, posting_at=None):
         batch_items.update(by_name)
     if any(qty < 0 for qty in buckets.values()):
         raise StockError(RECONCILIATION_FAILED)
-    return (buckets, bins), _batch_totals(company, pairs, batch_items, buckets)
+    return (buckets, bins), _batch_totals(company, pairs, batch_items, buckets, locked=locked)
 
 
 def get_available(company, sku_id, location_id, payload, *, authorize):

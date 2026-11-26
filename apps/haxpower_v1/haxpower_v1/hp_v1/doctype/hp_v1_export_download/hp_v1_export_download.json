@@ -1,0 +1,35 @@
+{
+ "doctype": "DocType",
+ "name": "HP V1 Export Download",
+ "module": "HP V1",
+ "engine": "InnoDB",
+ "field_order": [
+  "export_id",
+  "actor",
+  "sha256"
+ ],
+ "fields": [
+  {
+   "fieldname": "export_id",
+   "label": "Export Id",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "actor",
+   "label": "Actor",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sha256",
+   "label": "Sha256",
+   "fieldtype": "Data",
+   "read_only": 1
+  }
+ ],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "permissions": []
+}

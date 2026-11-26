@@ -43,7 +43,7 @@ jobs:
             python3 dev/v1/v1.py preflight
           } 2>&1 | tee "$RUNNER_TEMP/hp-v1-evidence/preflight.log"
 
-      - name: Test corrections, approvals, native movements, guards and recovery
+      - name: Test authorized reports, exports, native movements, corrections and recovery
         run: |
           {
             python3 dev/v1/v1.py up

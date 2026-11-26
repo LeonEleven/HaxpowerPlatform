@@ -115,19 +115,19 @@ def _reason(code, *, bucket=None, operation_id=None, line_id=None):
             "operation_id": operation_id, "line_id": line_id}
 
 
-def _native_index(company):
+def _native_index(company, *, locked=True):
     rows = frappe.db.sql(
         f"""SELECT l.line_id,l.operation_id,l.parent_type,l.parent_id,l.detail_id,l.role,l.detail_type,
             o.creation,o.action,o.original_operation,o.document_id
             FROM `tab{stock.LINK}` l JOIN `tab{stock.LOG}` o ON o.name=l.operation_id
             JOIN `tab{stock.DOCUMENT}` d ON d.name=o.document_id
-            WHERE d.company=%s AND o.status='Effective' FOR UPDATE""", (company,), as_dict=True,
+            WHERE d.company=%s AND o.status='Effective'""" + (" FOR UPDATE" if locked else ""), (company,), as_dict=True,
     )
     return {(row.parent_type, row.parent_id, row.detail_id): row for row in rows}
 
 
-def _allocations(company, entries):
-    index = _native_index(company)
+def _allocations(company, entries, *, locked=True):
+    index = _native_index(company, locked=locked)
     allocations = defaultdict(list)
     for bucket, rows in entries.items():
         if bucket.company != company:

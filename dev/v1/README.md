@@ -248,3 +248,15 @@ V1-13 恢复点保留已开启的设置、待审收货、获批待发移库和�
 审批权限、累计额度、下游交易和无差异盘点、独立连接竞争及结果回放。升级及恢复探针保留一个已部分
 生效、一个待专项审批和一条人工审核。恢复后验证原额度和同键结果可继续复核。
 合成纠错仅在专用 Bench 上使用零估值、拒绝 GL 的候选配置。B11 生产备份实施与 B12 正式估值另行验收。
+
+## V1-15 目录、库存读取与导出验证
+
+合成集成脚本从已合并的 V1-14 `5409db9` 建立含原生数量、盘点、移库、审批和纠错的升级站，保留之前的升级及恢复测试。新增 `probe.py inventory-reporting <site>` 在隔离站用真实 Cookie 访问员工接口，并核对 Excel、权限撤销和原生对账。版本和导出元数据纳入恢复对比；一致备份还需包含站点的 `private/haxpower_v1`，该目录独立于 Frappe 默认的 private/files 归档。
+
+受控维护可将 `SYSTEM_MAINTAIN` 员工设为 Bench 进程当前身份后调用 `haxpower_v1.inventory.read.diagnostics.reconcile(company, sku_id=None, location_id=None)`。清理仅处理过期生成文件，由同一能力调用 `haxpower_v1.reporting.exports.purge_expired`。报告私有路径和备份读取应使用站点服务账号；代理发布检查需验证该目录无法直接获取。
+
+2026-11-27 隔离站实测使用 Frappe/ERPNext v16.55.0 和 MariaDB 11.8.9。48 项 App
+测试通过。员工 Cookie HTTP、XLSX、撤权、移库收退、盘点净额及 Bin/Bundle/SLE 故障探测通过。
+1,000 个合成目录 SKU 的第 901–1,000 条搜索和产品投影耗时 61 ms，数据库 20 条语句
+合计 27 ms，Python 追踪峰值 364 KiB。关键词查询计划扫描 1,003 个 SKU 候选，品牌走主键，
+精确标识子查询走 parent 索引。该数据量仅覆盖目录搜索，生产规模的多年原生历史仍需单独测量。

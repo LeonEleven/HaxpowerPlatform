@@ -228,3 +228,20 @@ complete 携带任务投影（含期望 revision、原快照身份和稳定行�
 `inventory.corrections.service` 提供 `eligibility`、`save_draft`、`submit`、`approve`、`reject`、`withdraw`、`record_review`、`reject_review`、`close_review`、`link_replacement` 和 `history`。申请行只接收原行 ID、数量字符串、原因和备注，服务端确定库存维度和反向方向。变更状态需要 revision，提交、审批及审核使用幂等键。人工审核记录危险依赖并阻断数量执行。获批后同键重放返回原结果。
 
 `inventory.operations.trace.by_document` 和 `detail` 提供面向 V1-15 的受控读取。原行详情可查询原生关系令牌、按域维度的数量变动、部分纠错关联和剩余额度。DTO 保持领域 ID 及无批次语义。生产数量写入与完整查询分页、报表和导出遵循各自验收计划。
+
+## V1-15 员工目录、库存和报表 RPC
+
+使用已认证会话访问 `/api/method/haxpower_v1.<module>.<method>`。读取为 GET，Frappe 响应的 `message` 包含 DTO。分页使用 `page`（从 1 起）和 `pageSize`（1–100，默认 20），兼容原 `limit` 和零基 `offset`，每次请求选择一种。响应给出 `rows` 和授权后的 `total`。排序随报表固定并包含稳定 ID。JSON 对象 `criteria` 可作为 GET 查询参数编码；POST 使用 JSON 请求体。
+
+| 模块 | 方法 | 筛选及权限 |
+| --- | --- | --- |
+| access.api | search_products、product_filters、get_sku、get_specification | PRODUCT_READ。列表可传 `query`、`category`、`brand`、`sku_code`、`attributes`（属性 ID 到精确标量或选项 ID）。详情使用 `sku_id` 或 `specification_id`。 |
+| inventory.read.api | stock、distribution、batches、transit | INVENTORY_READ 和授权公司/仓库。在产品筛选之上可传 `company`、`sku_id`、`warehouse_id`、`location_id`、`batch`、`include_zero`。 |
+| inventory.read.api | ledger、period、documents、corrections | 同库存权限。流水可增加 `start`、`end`、`action`、`document_number`、`direction`（INCREASE/DECREASE）。期间必需起止日期。单据筛选用建立日期及单据类型。 |
+| inventory.read.api | document、history、audit | `document_id` 和可选 `company`。详情完整仓库范围，audit 同时要求普通或专项审批。 |
+| reporting.api | generate、status、download | 同相应报告权限并要求 EXPORT。generate POST，JSON `report` 和 `criteria`；status GET 及 download POST 使用 `export_id`。download 返回附件。 |
+| access.api | csrf_token | 已认证用户取得当前会话的 CSRF 值，POST 放入 `X-Frappe-CSRF-Token`。 |
+
+省略 `batch` 时遍历现有桶。显式 JSON null 是无批次。字符串按业务批次身份精确匹配。响应同时可提供领域 `batch_id`。数量使用十进制字符串。日期为站点业务时区下的 inclusive YYYY-MM-DD，实际比较采用开始当天零时至结束次日零时的半开区间。流水用原生 `posting_datetime`，以操作、行及桶标识打破同时间顺序。期间行包含期初、增加、减少、期末和动作分类。物理和双侧授权在途各有独立的桶类型。在途详情使用领域移库行，发出、实收、退回和剩余可核对。
+
+普通查询与导出不通过浏览器或共享代理缓存。未知或不可读资源统一权限拒绝，原生事实不一致时员工使用 `INVENTORY_READ_UNAVAILABLE`。正式员工数量写 API 的放行由后续验收控制。

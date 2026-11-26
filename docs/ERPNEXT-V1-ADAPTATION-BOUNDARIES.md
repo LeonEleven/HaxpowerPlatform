@@ -151,3 +151,7 @@ V1-13 的库存审批由 Haxpower 服务管理。Stock Entry 和 Stock Reconcili
 ### V1-14 反向数量适配
 
 对原 SKU、叶仓、Batch 及 UOM 使用 Document 提交新增 Material Issue 或 Material Receipt。盘点按原生已分配净差反向，保留原 Stock Reconciliation。原生 Bundle、SLE、Batch、Bin 和 GL 随同一事务核对。隔离候选采用零估值，拒绝 GL 或价值差异，正式估值策略由 B12 审查。同桶后续依赖或已接收移库由应用留证处理。
+
+### V1-15 原生读取与下载边界
+
+ERPNext SLE、Bundle、Batch、Bin 与轻量操作日志共同用于数量验证。读侧使用一致快照与已有规则，员工 API 仅发出业务数量和领域 ID。Stock Reconciliation 的同操作、原行、同桶的原生行归并为业务净量。受控系统维护诊断提供公司范围对账；诊断不编辑原生记录。文件通过明确白名单的 V1 RPC 交付，原生 File REST、标准下载、Prepared Report、打印和导出入口继续受限。生产代理的私有目录隔离列入 G07/G09 验收。

@@ -91,6 +91,10 @@ def snapshot():
                 "schema": frappe.db.sql(f"SHOW CREATE TABLE `tab{table}`")[0][1],
                 "rows": frappe.get_all(table, fields=["*"], order_by="name"),
             }
+    reporting = {}
+    for doctype in ("HP V1 Export", "HP V1 Export Download"):
+        if frappe.db.table_exists(doctype):
+            reporting[doctype] = frappe.get_all(doctype, fields=["*"], order_by="name")
     posted = {table: frappe.get_all(table, fields=["*"], order_by="name") for table in (
         "Stock Entry", "Stock Entry Detail", "Serial and Batch Bundle", "Serial and Batch Entry",
         "Stock Ledger Entry", "Bin", "GL Entry", "Payment Ledger Entry", "Repost Item Valuation",
@@ -98,7 +102,8 @@ def snapshot():
     )}
     return {"access": access, "approval": approval, "batch": batch, "operations": operations, "schema": schema, "rows": rows,
             "patches": logs, "catalog": catalog, "sku": sku,
-            "warehouse": warehouse, "posted": posted, "inventory": inventory, "corrections": corrections}
+            "warehouse": warehouse, "posted": posted, "inventory": inventory, "corrections": corrections,
+            "reporting": reporting}
 
 
 def main(action, site):
@@ -237,6 +242,10 @@ def main(action, site):
             from count_probe import run
 
             run(site)
+        elif action in ("inventory-reporting", "inventory-reporting-recovered"):
+            from report_probe import run, verify_recovered
+
+            (run if action == "inventory-reporting" else verify_recovered)(site)
         elif action == "access-http":
             from access_probe import verify_http
 
