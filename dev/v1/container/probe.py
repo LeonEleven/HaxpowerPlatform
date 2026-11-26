@@ -7,7 +7,7 @@ import sys
 import frappe
 import haxpower_v1
 
-from bench import LOCK, TARGETS, check_targets, require
+from bench import LOCK, PROJECT, TARGETS, check_targets, require
 
 
 DOCTYPE = "HP V1 Migration Sample"
@@ -99,6 +99,10 @@ def main(action, site):
     frappe.init(site=site, sites_path=str(Path.cwd()))
     frappe.connect()
     try:
+        if PROJECT.startswith("haxpower-v1-ci-"):
+            # Upgrade and recovery share a site and create distinct identities.
+            # Keep their fixture budget local to this CLI process.
+            frappe.conf.throttle_user_limit = 256
         if action == "identity":
             print(json.dumps(identity_evidence(site), sort_keys=True))
         elif action == "snapshot":
