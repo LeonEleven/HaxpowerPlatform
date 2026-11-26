@@ -510,7 +510,16 @@ def run(site):
 
 
 def verify_persisted():
-    _, state = fresh_state()
+    submissions, events = {}, {}
+    with connection():
+        lock_stock_writes()
+        state = snapshot()
+        if frappe.db.table_exists("HP V1 Approval Submission"):
+            from haxpower_v1.approval import EVENT, SUBMISSION
+
+            submissions = {row.name: row for row in frappe.get_all(SUBMISSION, fields=["*"])}
+            for event in frappe.get_all(EVENT, filters={"result": "Succeeded"}, fields=["*"]):
+                events.setdefault(event.submission_id, []).append(event)
     requests = state[store.REQUEST]["rows"]
     links = state[store.LINK]["rows"]
     require(requests and len(requests) == len(state[store.LOG]["rows"])
@@ -536,8 +545,8 @@ def verify_persisted():
                     and log.effect_key == req.name and log.get("result_status"),
                     "persisted transfer follow-up lost effect or original dispatch identity")
         else:
-            require(log.effect_key == "APPLY" and (log.result_revision == 2 or (
-                log.action=='Stock Count' and log.result_revision==document.revision and document.status=='Completed')),
+            revision = _first_effect_revision(document, log, submissions, events)
+            require(log.effect_key == "APPLY" and log.result_revision == revision,
                 "original operation identity drift")
         history.setdefault(document.name, []).append(log)
     for identity, operations in history.items():
@@ -549,8 +558,10 @@ def verify_persisted():
                     and operations[0].result_revision==document.revision,
                     'persisted count completion lost its edited task revision')
             continue
-        require([log.result_revision for log in operations] == list(range(2, document.revision + 1))
-                and operations[0].name == document.effective_operation,
+        initial = operations[0]
+        revision = _first_effect_revision(document, initial, submissions, events)
+        require([log.result_revision for log in operations] == list(range(revision, document.revision + 1))
+                and initial.name == document.effective_operation,
                 "persisted operation history is not continuous")
         latest = operations[-1]
         legacy_status = "In Transit" if latest.action == "Material Transfer" else "Effective"
@@ -558,3 +569,29 @@ def verify_persisted():
                 "latest operation and current document status differ")
     print(f"Fresh connection verified {len(requests)} committed requests and {len(links)} stable native links.",
           flush=True)
+
+
+def _first_effect_revision(document, log, submissions, events):
+    submission_id = document.get("approval_submission")
+    if not submission_id:
+        return document.revision if log.action == "Stock Count" else 2
+
+    submission = submissions.get(submission_id)
+    require(submission and (submission.company, submission.document_id, submission.document_type)
+            == (document.company, document.name, document.document_type),
+            "original effect has no matching submission")
+    required = submission.approval_required
+    revision = submission.business_revision + (2 if required else 1)
+    action = "Approve" if required else "Approval Exempt"
+    transfer = document.document_type == "Material Transfer"
+    status = ("Approved" if required else "Ready to Dispatch") if transfer else log.result_status
+    evidence, = [event for event in events.get(submission_id, ()) if event.action == action]
+    require((evidence.company, evidence.document_id, evidence.business_revision, evidence.resulting_status)
+            == (document.company, document.name, revision, status),
+            "original effect has inconsistent workflow evidence")
+    if transfer:
+        require(not evidence.operation_id, "transfer approval recorded a quantity effect")
+        return revision + 1
+    require((evidence.operation_id, evidence.actor, evidence.native_actor)
+            == (log.name, log.actor, log.native_actor), "original effect lost its approval and actor references")
+    return revision

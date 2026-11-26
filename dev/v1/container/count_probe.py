@@ -137,6 +137,10 @@ def compete(site,actor,company,first,second):
 
 
 def run(site):
+    # A migrated fixture can have a cached Dynamic Link map from its earlier
+    # Stock Entries. Clear it before the first native reconciliation, outside
+    # the protected stock transaction that rejects deferred callbacks.
+    frappe.clear_cache()
     frappe.db.set_default("float_precision", "3")
     for purpose in ('Material Receipt','Material Issue'):
         if not frappe.db.exists('Stock Entry Type',purpose):
@@ -281,6 +285,7 @@ def run(site):
 
 def extended(site):
     """Quantity-write coverage, races, generation and native maintenance."""
+    from transfer_probe import dispatch_command
     from haxpower_v1.inventory.transfer import service as transfers, dto as transfer_dto, transit
     from haxpower_v1.inventory.guard import lock_stock_writes
     from haxpower_v1.adapters.erpnext import stock_count as native
@@ -318,7 +323,7 @@ def extended(site):
         before=state()
         draft=transfers.create_draft(transfer_dto.TransferDraftInput(company,(
             transfer_dto.TransferLineInput(sku,source,target,NO_BATCH,'10',PREFIX),),'Synthetic count version transfer'))
-        transfers.dispatch(transfer_dto.DispatchTransfer(draft,uuid4().hex))
+        transfers.dispatch(dispatch_command(draft))
         changed(before,{source,transit_id});reject('COUNT_SCOPE_CHANGED',lambda:finish(old))
         dispatch=transfers.get_dispatch(company,draft.transfer_id)
         old=actual(create(company,target,sku=sku))
@@ -422,7 +427,7 @@ def extended(site):
             if kind in ('receive','return'):
                 draft=transfers.create_draft(transfer_dto.TransferDraftInput(company,(
                     transfer_dto.TransferLineInput(sku,source,target,NO_BATCH,'2',PREFIX),),'Synthetic race'))
-                transfers.dispatch(transfer_dto.DispatchTransfer(draft,uuid4().hex))
+                transfers.dispatch(dispatch_command(draft))
                 dispatch=transfers.get_dispatch(company,draft.transfer_id)
                 cls=transfer_dto.ReceiveTransfer if kind=='receive' else transfer_dto.ReturnTransfer
                 write=cls(company,dispatch.transfer_id,dispatch.revision,uuid4().hex,
@@ -430,7 +435,7 @@ def extended(site):
             elif kind=='dispatch':
                 draft=transfers.create_draft(transfer_dto.TransferDraftInput(company,(
                     transfer_dto.TransferLineInput(sku,source,target,NO_BATCH,'1',PREFIX),),'Synthetic race'))
-                write=transfer_dto.DispatchTransfer(draft,uuid4().hex)
+                write=dispatch_command(draft)
             elif kind=='issue':
                 write=SubmitIssue(issues.create_draft(IssueDraftInput(company,(
                     IssueLineInput(sku,source,NO_BATCH,'1',PREFIX),))),uuid4().hex)

@@ -7,6 +7,7 @@ from frappe.model.document import Document
 from frappe.utils import now_datetime
 
 from ...access.policy import deny
+from ...approval import TABLES as APPROVAL_TABLES
 from ...catalog.persistence import _index_columns
 from ...catalog.validation import DECIMAL_WIDTH
 from ..guard import GUARD, GUARD_ID
@@ -46,7 +47,7 @@ class ProtectedRecord(Document):
 def insert(doctype, *, name=None, **fields):
     # Internal records only. No notifications, background enqueue, cache writes
     # or user-provided table or column names run through this repository.
-    if doctype not in TABLES:
+    if doctype not in TABLES and doctype not in APPROVAL_TABLES:
         raise ValueError("Unknown stock record type")
     name = name or uuid4().hex
     actor = frappe.session.user

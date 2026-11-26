@@ -262,6 +262,7 @@ def reconcile(company, item_codes, leaf, buckets):
 
 
 def verify_document(doc, lines, lifecycle):
+    from ...approval.service import dispatch_revision
     from ..operations.service import payload_digest
 
     originals = {row.line_id: row for row in lifecycle.originals.values() if row.operation_id == doc.effective_operation}
@@ -288,7 +289,8 @@ def verify_document(doc, lines, lifecycle):
             effects[effect.operation].append(effect)
     remaining = {identity: stock._number(row.quantity) for identity, row in originals.items()}
     received, returned = defaultdict(Decimal), defaultdict(Decimal)
-    for revision, log in enumerate(logs, 2):
+    base = dispatch_revision(doc)
+    for revision, log in enumerate(logs, base + 1):
         if (
             (log.request_status, log.request_actor, log.request_company, log.request_document)
             != ("Completed", log.actor, doc.company, doc.name)
@@ -296,7 +298,7 @@ def verify_document(doc, lines, lifecycle):
             != (log.action, log.name, revision, revision, "Effective")
         ):
             raise StockError(INCONSISTENT)
-        if revision == 2:
+        if revision == base + 1:
             if (log.action != stock.TRANSFER or log.effect_key != "APPLY" or log.original_operation
                     or log.reason != doc.reason or (log.result_status or IN_TRANSIT) != IN_TRANSIT):
                 raise StockError(INCONSISTENT)
@@ -307,7 +309,7 @@ def verify_document(doc, lines, lifecycle):
                 (row.line_id, row.native_detail, stock.DISPATCH) for row in originals.values()
             }:
                 raise StockError(INCONSISTENT)
-            command = Command(doc.company, doc.name, 1, "",
+            command = Command(doc.company, doc.name, base, "",
                               tuple(replace(line, batch_id=None) for line in lines), doc.reason, notes=doc.notes)
         else:
             operation_effects = effects.pop(log.name, ())

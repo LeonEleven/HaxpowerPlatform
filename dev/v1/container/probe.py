@@ -7,7 +7,7 @@ import sys
 import frappe
 import haxpower_v1
 
-from bench import LOCK, TARGETS, check_targets, require
+from bench import LOCK, PROJECT, TARGETS, check_targets, require
 
 
 DOCTYPE = "HP V1 Migration Sample"
@@ -76,12 +76,20 @@ def snapshot():
         if frappe.db.table_exists(table):
             inventory[table] = dict(schema=frappe.db.sql(f'SHOW CREATE TABLE `tab{table}`')[0][1],
                                     rows=frappe.get_all(table,fields=['*'],order_by='name'))
+    approval = {}
+    for table in ("Approval Settings", "Approval Setting Change", "Approval Submission", "Approval Event", "Approval Request"):
+        doctype = f"HP V1 {table}"
+        if frappe.db.table_exists(doctype):
+            approval[doctype] = {
+                "schema": frappe.db.sql(f"SHOW CREATE TABLE `tab{doctype}`")[0][1],
+                "rows": frappe.get_all(doctype, fields=["*"], order_by="name"),
+            }
     posted = {table: frappe.get_all(table, fields=["*"], order_by="name") for table in (
         "Stock Entry", "Stock Entry Detail", "Serial and Batch Bundle", "Serial and Batch Entry",
         "Stock Ledger Entry", "Bin", "GL Entry", "Payment Ledger Entry", "Repost Item Valuation",
         "Stock Reconciliation", "Stock Reconciliation Item",
     )}
-    return {"access": access, "batch": batch, "operations": operations, "schema": schema, "rows": rows,
+    return {"access": access, "approval": approval, "batch": batch, "operations": operations, "schema": schema, "rows": rows,
             "patches": logs, "catalog": catalog, "sku": sku,
             "warehouse": warehouse, "posted": posted, "inventory": inventory}
 
@@ -91,6 +99,10 @@ def main(action, site):
     frappe.init(site=site, sites_path=str(Path.cwd()))
     frappe.connect()
     try:
+        if PROJECT.startswith("haxpower-v1-ci-"):
+            # Upgrade and recovery share a site and create distinct identities.
+            # Keep their fixture budget local to this CLI process.
+            frappe.conf.throttle_user_limit = 256
         if action == "identity":
             print(json.dumps(identity_evidence(site), sort_keys=True))
         elif action == "snapshot":
@@ -188,6 +200,13 @@ def main(action, site):
             from count_probe import recovery_prepare, recovery_finish
 
             (recovery_prepare if action=='count-recovery-prepare' else recovery_finish)()
+        elif action in {"approval", "approval-recovery-prepare", "approval-recovery-finish"}:
+            from approval_probe import recovery_finish, recovery_prepare, run
+
+            if action == "approval":
+                run(site)
+            else:
+                (recovery_prepare if action.endswith("prepare") else recovery_finish)()
         elif action == "stock-count-native":
             from count_probe import native_boundaries
 

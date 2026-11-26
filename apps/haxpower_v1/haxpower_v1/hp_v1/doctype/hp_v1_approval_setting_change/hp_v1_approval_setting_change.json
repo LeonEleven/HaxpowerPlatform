@@ -1,0 +1,48 @@
+{
+ "doctype": "DocType",
+ "name": "HP V1 Approval Setting Change",
+ "module": "HP V1",
+ "engine": "InnoDB",
+ "field_order": [
+  "revision",
+  "previous_value",
+  "new_value",
+  "actor",
+  "reason"
+ ],
+ "fields": [
+  {
+   "fieldname": "revision",
+   "label": "Revision",
+   "fieldtype": "Int",
+   "read_only": 1
+  },
+  {
+   "fieldname": "previous_value",
+   "label": "Previous Value",
+   "fieldtype": "Check",
+   "read_only": 1
+  },
+  {
+   "fieldname": "new_value",
+   "label": "New Value",
+   "fieldtype": "Check",
+   "read_only": 1
+  },
+  {
+   "fieldname": "actor",
+   "label": "Actor",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reason",
+   "label": "Reason",
+   "fieldtype": "Small Text",
+   "read_only": 1
+  }
+ ],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "permissions": []
+}

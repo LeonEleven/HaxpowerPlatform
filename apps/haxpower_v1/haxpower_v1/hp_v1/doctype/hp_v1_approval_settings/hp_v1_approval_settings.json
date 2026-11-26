@@ -1,0 +1,27 @@
+{
+ "doctype": "DocType",
+ "name": "HP V1 Approval Settings",
+ "module": "HP V1",
+ "engine": "InnoDB",
+ "field_order": [
+  "revision",
+  "inventory_approval_enabled"
+ ],
+ "fields": [
+  {
+   "fieldname": "revision",
+   "label": "Revision",
+   "fieldtype": "Int",
+   "read_only": 1
+  },
+  {
+   "fieldname": "inventory_approval_enabled",
+   "label": "Inventory Approval Enabled",
+   "fieldtype": "Check",
+   "read_only": 1
+  }
+ ],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "permissions": []
+}

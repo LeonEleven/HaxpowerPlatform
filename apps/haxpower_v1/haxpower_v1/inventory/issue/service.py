@@ -12,7 +12,7 @@ from ...adapters.erpnext import issue as native
 from .. import availability
 from ..operations.dto import Command, Line, QuantitySign, StockError
 from ..operations.quantity import canonical_quantity
-from ..operations.service import Action, _create_draft, _execute
+from ..operations.service import Action, _create_draft, _execute, _revise_draft
 from ..posting import batch_input, require_fixture, selection
 from .dto import IssueDraft, IssueDraftInput, IssueLine, IssueResult, SubmitIssue
 
@@ -75,6 +75,18 @@ def create_draft(payload: IssueDraftInput) -> IssueDraft:
     return IssueDraft(draft.company, draft.document_id, draft.expected_revision, _public_lines(draft.lines), draft.reason)
 
 
+def revise_draft(draft: IssueDraft, *, notes=None) -> IssueDraft:
+    candidate = _authorize(draft.company)
+    ids = tuple(line.line_id or uuid4().hex for line in draft.lines)
+    new_ids = {id_ for line, id_ in zip(draft.lines, ids, strict=True) if not line.line_id}
+    lines = tuple(_line(line, number, id_) for number, (line, id_) in enumerate(
+        zip(draft.lines, ids, strict=True), 1,
+    ))
+    command = Command(draft.company, draft.document_id, draft.revision, uuid4().hex, lines, draft.reason)
+    updated = _revise_draft(command, _action(candidate), new_line_ids=new_ids, notes=notes)
+    return replace(draft, revision=updated.expected_revision, lines=_public_lines(updated.lines))
+
+
 def submit(payload: SubmitIssue) -> IssueResult:
     return _submit(payload)
 
@@ -86,7 +98,8 @@ def _submit(payload, *, before_guard=None, commit=None):
     command = Command(draft.company, draft.document_id, draft.revision, payload.idempotency_key, lines, draft.reason)
     result = _execute(command, _action(candidate), before_guard=before_guard, commit=commit)
     canonical = tuple(replace(line, quantity=canonical_quantity(line.quantity)) for line in lines)
-    return IssueResult(result.document_id, result.operation_id, "Effective", result.revision, _public_lines(canonical))
+    return IssueResult(result.document_id, result.operation_id, result.status, result.revision,
+                         _public_lines(canonical), result.submission_id)
 
 
 def get_availability(company, sku_id, source_location_id, batch):

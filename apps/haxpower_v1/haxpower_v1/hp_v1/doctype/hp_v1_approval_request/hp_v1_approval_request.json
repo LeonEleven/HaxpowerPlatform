@@ -1,0 +1,71 @@
+{
+ "doctype": "DocType",
+ "name": "HP V1 Approval Request",
+ "module": "HP V1",
+ "engine": "InnoDB",
+ "field_order": [
+  "company",
+  "actor",
+  "document_id",
+  "submission_id",
+  "action",
+  "payload_digest",
+  "response",
+  "failure_code"
+ ],
+ "fields": [
+  {
+   "fieldname": "company",
+   "label": "Company",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "actor",
+   "label": "Actor",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "document_id",
+   "label": "Document Id",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "submission_id",
+   "label": "Submission Id",
+   "fieldtype": "Data",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "action",
+   "label": "Action",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "payload_digest",
+   "label": "Payload Digest",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "response",
+   "label": "Response",
+   "fieldtype": "Long Text",
+   "read_only": 1
+  },
+  {
+   "fieldname": "failure_code",
+   "label": "Failure Code",
+   "fieldtype": "Data",
+   "read_only": 1
+  }
+ ],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "permissions": []
+}

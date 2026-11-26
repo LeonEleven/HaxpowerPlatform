@@ -240,7 +240,7 @@ V1-11 经审查及手动合并后进入 V1-12 盘点版本集成。
 
 开始工作前获取最新 `origin/main`，核对当前工作区和相关 PR 的实际状态、分支及提交，区分已合并工作、审查中的改动和待开工任务。交接快照用于定位证据，进度以 Git 和 GitHub 的最新记录为准。
 
-**V1-12 Draft PR #25，2026-11-25（Asia/Shanghai）。** 本次核对 V1-11 PR #24 已由
+**V1-12 PR #25 已合并，2026-11-25（Asia/Shanghai）。** 本次核对 V1-11 PR #24 已由
 LeonEleven 于 09:54 手动合并，main 为 `2c8f42970112176b61e198081b82e084688c7649`。
 V1-12 专属分支 `feat/v1-12-stock-count-versioning` 的 App 0.13.0 实现 LOCATION / SKU / BUCKET、
 服务端快照、实盘显式确认与零、新发现桶、差异与无差异完成、版本陈旧拒绝及追加重盘。
@@ -253,13 +253,32 @@ B05-01–04 的正式批准日期和来源已写入 DECISIONS 第 8 节，其他
 
 本地隔离合成站已通过既有真实入库、并发、故障和估值回归；盘点主矩阵通过三种范围、混合批次/品牌、
 实盘零、账面零盘盈、发现桶、无差异、无关范围变化、数量往返过期、重盘、双连接竞争、幂等/撤权、
-日志/版本/状态/请求故障回滚及提交断连恢复。扩展写入竞争、原生期间/GL、回填中断零残留已通过。升级与一致恢复，以及完整 Frappe/HTTP 验证状态详见 [V1-12 验证报告](V1-12-STOCK-COUNT-REPORT.md) 和 [Draft PR #25 检查](https://github.com/LeonEleven/HaxpowerPlatform/pull/25/checks)，不能据此宣布 A06 或完整生产验收通过。
+日志/版本/状态/请求故障回滚及提交断连恢复。扩展写入竞争、原生期间/GL、回填中断零残留已通过。升级、一致恢复、Frappe 和 HTTP 全套验证通过，见 [V1-12 验证报告](V1-12-STOCK-COUNT-REPORT.md) 和 [PR #25 完整 CI](https://github.com/LeonEleven/HaxpowerPlatform/actions/runs/45561795379/job/139026998758)。A06 保留发布验收条件。
 
-正式员工数量写入继续关闭；B01/B02/B03/B04/B06/B07/B08/B11/B12 的未决部分保留。
+正式员工数量写入继续关闭；B01/B02/B03/B04/B07/B08/B11/B12 的未决部分保留。B06 见下方 V1-13 记录。
 原生 helper 所需类型权限由支持的 Custom DocPerm 提供，受管详情、HTTP 与原生生命周期守卫继续执行。
 当前使用共享锁及全量受管历史核对，生产放行前须评估大历史量时的锁耗时。
-下一任务为 V1-12 架构审查及负责人手动合并后进入 V1-13；V1-14 纠错、V1-20 发布回归仍未完成。
+项目负责人手动合并后的 main 为 `66220768e4bfed72cf455a862acb74b0ff44b9c9`。V1-13 从该提交开始。
 
 [V1-12 任务分支](https://github.com/LeonEleven/HaxpowerPlatform/tree/feat/v1-12-stock-count-versioning) ·
 [V1-11 PR #24](https://github.com/LeonEleven/HaxpowerPlatform/pull/24) ·
 [盘点验证入口](../dev/v1/README.md#v1-12-非冻结盘点和库存版本验证)
+
+
+**V1-13 Draft PR #26，2026-11-25（Asia/Shanghai）。** App 0.14.0 接入站点级审批开关、不可变提交快照、
+修订重提、批准/驳回/撤回、移库发出前撤销，以及原生记账与审批成功的原子事务。B06-01–08
+由项目负责人在 V1-13 任务书第二节批准，见项目决策第 9 节。待审批盘点遵循 B05 代次和版本，
+过期后通过撤回及重盘衔接。移库接收及带原因余量退回无需重复审批。项目的审批人和库存操作者
+独立授权，原生执行身份及触发者分别入账。
+
+已核对空站安装、47 项 Frappe 回归、空站重复迁移及原生收发回归。隔离审批探针通过开关与跨公司、
+身份桥接、盘点版本、移库双侧、独立连接竞争、原生及审批写入故障、断连和失败竞争。
+升级恢复与最新工程状态见 Draft PR 的 Actions。A06、A10、G06 保留发布、
+附件和浏览器验收条件。员工正式数量 HTTP 写入继续关闭。B02/B04/B07/B08/B10/B12 保持待确认。
+经本任务架构审查及负责人手动合并后，下一任务为 V1-14 纠错。V1-20 增加多年合成库存流水规模的持锁、
+并发和性能验证。
+
+[V1-13 任务分支](https://github.com/LeonEleven/HaxpowerPlatform/tree/feat/v1-13-approval-workflow) ·
+[Draft PR #26](https://github.com/LeonEleven/HaxpowerPlatform/pull/26) ·
+[Actions 检查](https://github.com/LeonEleven/HaxpowerPlatform/pull/26/checks) ·
+[验收入口](../dev/v1/README.md#v1-13-库存审批验证)

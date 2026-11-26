@@ -121,34 +121,48 @@ def verify_upgraded(state, before):
     verify_catalog_schema(state)
 
 
-def verify_transfer_upgrade(state, baseline, *, failed=False):
-    operations = dict(state['operations'])
-    log, old = operations[OPERATION_LOG], baseline['operations'][OPERATION_LOG]
-    require('`quantity_effect` ' in log['schema'], 'missing explicit no-quantity effect schema')
-    require(all(row.get('quantity_effect') is None for row in log['rows']), 'migration rewrote historic logs')
-    # Model sync may remove a single-column custom unique index before the
-    # after_migrate hook restores it. The injected post-sync failure is earlier.
-    ignored = ('`quantity_effect` ',) + (('UNIQUE KEY `hp_v1_stock_operation_request`',) if failed else ())
+def verify_approval_install(state):
+    settings = "HP V1 Approval Settings"
+    tables = state["approval"]
+    require(set(tables) == {"HP V1 Approval " + name for name in (
+        "Settings", "Setting Change", "Submission", "Event", "Request",
+    )}, "approval schema missing")
+    row, = tables[settings]["rows"]
+    require((row["name"], row["revision"], row["inventory_approval_enabled"]) == ("inventory", 1, 0),
+            "approval configuration did not initialize disabled")
+    require(all(not table["rows"] for name, table in tables.items() if name != settings),
+            "migration inferred historical approval facts")
 
-    def normalized(schema):
-        lines=[line.strip().rstrip(',') for line in schema.splitlines()
-               if not line.strip().startswith(ignored)]
-        # Recreated indexes can move in SHOW CREATE TABLE without changing
-        # columns or constraints. Preserve columns, compare indexes as a set.
-        indexes=tuple(sorted(line for line in lines if line.startswith(('PRIMARY KEY','KEY ','UNIQUE KEY','CONSTRAINT '))))
-        structure=tuple(line for line in lines if not line.startswith(('PRIMARY KEY','KEY ','UNIQUE KEY','CONSTRAINT ')))
-        return structure,indexes
-    current_schema, prior_schema = normalized(log['schema']), normalized(old['schema'])
-    if current_schema != prior_schema:
-        missing = sorted(set(prior_schema[0] + prior_schema[1]) - set(current_schema[0] + current_schema[1]))
-        added = sorted(set(current_schema[0] + current_schema[1]) - set(prior_schema[0] + prior_schema[1]))
-        raise ValueError(f'unexpected V1-12 stock log schema change: missing={missing}, added={added}')
-    operations[OPERATION_LOG] = dict(schema=old['schema'],rows=[{k:v for k,v in r.items() if k!='quantity_effect'} for r in log['rows']])
-    require(dict(state, operations=operations, inventory=baseline['inventory']) == baseline,
-            'V1-12 migration changed historical native or business quantity facts')
-    if not failed:
-        require(len(state['inventory'])==4 and len(state['inventory']['HP V1 Inventory Epoch']['rows'])==1
-                and bool(state['inventory']['HP V1 Inventory Version']['rows']), 'quantity version backfill missing')
+
+def verify_approval_upgrade(state, baseline, *, failed=False):
+    operations = dict(state["operations"])
+    added_fields = {"HP V1 Stock Document": "approval_submission", OPERATION_LOG: "native_actor"}
+
+    def normalized(schema, field):
+        ignored = (f"`{field}` ",)
+        if failed:
+            ignored += ("UNIQUE KEY `hp_v1_stock_operation_request`",)
+        lines = [line.strip().rstrip(",") for line in schema.splitlines()
+                 if not line.strip().startswith(ignored)]
+        indexes = tuple(sorted(line for line in lines if line.startswith(("PRIMARY KEY", "KEY ", "UNIQUE KEY", "CONSTRAINT "))))
+        structure = tuple(line for line in lines if not line.startswith(("PRIMARY KEY", "KEY ", "UNIQUE KEY", "CONSTRAINT ")))
+        return structure, indexes
+
+    for doctype, field in added_fields.items():
+        current, prior = operations[doctype], baseline["operations"][doctype]
+        require(all(row.get(field) is None for row in current["rows"]), f"migration inferred {field}")
+        require(normalized(current["schema"], field) == normalized(prior["schema"], field),
+                f"unexpected upgrade schema changes in {doctype}")
+        operations[doctype] = {"schema": prior["schema"],
+                               "rows": [{key: value for key, value in row.items() if key != field}
+                                        for row in current["rows"]]}
+    require(dict(state, operations=operations, approval=baseline["approval"]) == baseline,
+            "V1-13 migration altered existing state or quantity history")
+    if failed:
+        require(all(not table["rows"] for table in state["approval"].values()),
+                "failed migration initialized approval settings before schema hooks")
+    else:
+        verify_approval_install(state)
 
 
 def recovery_point(backup):
@@ -213,6 +227,7 @@ def integration():
     verify_access_schema(clean)
     verify_batch_schema(clean)
     verify_stock_schema(clean)
+    verify_approval_install(clean)
     record("clean install and first migration", clean)
     repeat_migration(SITE, clean)
     inspect("receipt-seed", SITE)
@@ -223,6 +238,7 @@ def integration():
     inspect("stock-count", SITE)
     inspect("stock-count-extended", SITE)
     inspect("stock-count-native", SITE)
+    inspect("approval", SITE)
     clean_with_stock = inspect("snapshot", SITE)
     repeat_migration(SITE, clean_with_stock)
     rehearse_upgrade(clean_with_stock)
@@ -255,7 +271,7 @@ def rehearse_upgrade(clean):
             baseline = Path(path) / "apps/haxpower_v1"
             deploy_app(fixture=baseline)
             version = run(PYTHON, "-c", "import haxpower_v1; print(haxpower_v1.__version__)", capture=True)
-            require(version.strip() == "0.12.0", "expected the merged V1-11 app")
+            require(version.strip() == "0.13.0", "expected the merged V1-12 app")
             site_command("migrate", target=UPGRADE)
             baseline_empty = inspect("snapshot", UPGRADE)
             verify_upgraded(baseline_empty, previous)
@@ -276,18 +292,19 @@ def rehearse_upgrade(clean):
                     and len(seeded["warehouse"]["native_leaves"]) == 9
                     and len(seeded["access"]["assignments"]) == 2
                     and len(seeded["batch"]["rows"]) == len(seeded["batch"]["native"]) == 5,
-                    "unexpected merged V1-11 synthetic state")
+                    "unexpected merged V1-12 synthetic state")
             inspect("sku-concurrency", UPGRADE)
             inspect("stock-execution", UPGRADE)
             inspect("receipt-execution", UPGRADE)
             inspect("issue-execution", UPGRADE)
             inspect("seed-transfer-history", UPGRADE)
             inspect("settle-transfer-history", UPGRADE)
+            inspect("stock-count", UPGRADE)
+            inspect("count-recovery-prepare", UPGRADE)
             baseline_state = inspect("snapshot", UPGRADE)
-            record("merged V1-11 with native dispatch, receipt and return history, ownership, authorized requests, receipts and issues", baseline_state)
+            record("merged V1-12 with native movements, count tasks and inventory versions", baseline_state)
             def failed_upgrade(state):
-                verify_transfer_upgrade(state, baseline_state, failed=True)
-                inspect('version-backfill-fault', UPGRADE)
+                verify_approval_upgrade(state, baseline_state, failed=True)
             rehearse_failure(baseline, baseline_state, failed_upgrade)
         finally:
             deploy_app()
@@ -299,8 +316,8 @@ def run_upgraded_rehearsal(clean, baseline_state):
     check_bench()
     site_command("migrate", target=UPGRADE)
     upgraded = inspect("snapshot", UPGRADE)
-    verify_transfer_upgrade(upgraded, baseline_state)
-    record("V1-12 upgraded from merged V1-11; native facts preserved and versions backfilled", upgraded)
+    verify_approval_upgrade(upgraded, baseline_state)
+    record("V1-13 upgraded from merged V1-12; native facts and inventory versions preserved", upgraded)
     inspect("verify-inventory-versions", UPGRADE)
     inspect("verify-skus", UPGRADE)
     inspect("verify-access", UPGRADE)
@@ -318,9 +335,10 @@ def run_upgraded_rehearsal(clean, baseline_state):
     inspect("transfer-dispatch", UPGRADE)
     inspect("continue-v112-history", UPGRADE)
     inspect("stock-count", UPGRADE)
-    inspect("stock-count-extended", UPGRADE)
     inspect("stock-count-native", UPGRADE)
-    inspect("count-recovery-prepare", UPGRADE)
+    # The extended probe rotates the site's generation. Run it after the
+    # restored V1-12 Draft has proved continuity with its original snapshot.
+    inspect("approval-recovery-prepare", UPGRADE)
     populated = inspect("snapshot", UPGRADE)
     record("upgraded site with synthetic domain data and warehouse grants", populated)
     repeat_migration(UPGRADE, populated)
@@ -336,6 +354,7 @@ def run_upgraded_rehearsal(clean, baseline_state):
 
 
 def verify_recovered_stock(clean):
+    inspect("approval-recovery-finish", UPGRADE)
     inspect("count-recovery-finish", UPGRADE)
     inspect("verify-skus", UPGRADE)
     inspect("verify-access", UPGRADE)

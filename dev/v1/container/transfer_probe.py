@@ -45,9 +45,17 @@ def reject(code, call):
     require(fresh() == before, f"{code} changed persisted stock, accounting or dispatch evidence")
 
 
+def dispatch_command(draft):
+    if hasattr(service, "submit"):  # The V1-12 upgrade fixture predates transfer submission.
+        submitted = service.submit(DispatchTransfer(draft, uuid4().hex))
+        require(submitted.status == "Ready to Dispatch", "fixture requires exempt transfer submission")
+        draft = replace(draft, revision=submitted.revision)
+    return DispatchTransfer(draft, uuid4().hex)
+
+
 def command(company, *lines):
     draft = service.create_draft(TransferDraftInput(company, lines, "Synthetic dispatch", "Dispatch notes"))
-    return DispatchTransfer(draft, uuid4().hex)
+    return dispatch_command(draft)
 
 
 def _new_rows(before, after, table):
@@ -60,7 +68,7 @@ def checked(payload, result, before, *, value=None):
     dispatch = service.get_dispatch(payload.draft.company, result.transfer_id)
     require(
         (dispatch.status, dispatch.operation_id, dispatch.revision, dispatch.dispatched_by, dispatch.reason, dispatch.notes)
-        == ("In Transit", result.operation_id, 2, frappe.session.user, payload.draft.reason, payload.draft.notes)
+        == ("In Transit", result.operation_id, payload.draft.revision + 1, frappe.session.user, payload.draft.reason, payload.draft.notes)
         and dispatch.dispatched_at, "incorrect dispatch header",
     )
     native, = _new_rows(before, after, stock.ENTRY)
@@ -547,7 +555,7 @@ def followup_fixture():
 
 
 def seed_history():
-    # Called with the pinned V1-10 App still installed. Only V1-10 DTOs are needed here.
+    # Use the legacy two-phase DTOs from the pinned V1-12 baseline.
     actor, company, _, sample = followup_fixture()
     seed_receipts(company, actor, (replace(sample, quantity="20"),))
     with actor_session(actor, company), service.synthetic_candidate(company, limits=LIMITS):
@@ -555,4 +563,4 @@ def seed_history():
             reason = f"{UPGRADE_MARKER} {index}"
             draft = service.create_draft(TransferDraftInput(company, (sample,), reason, "Original V1-10 notes"))
             post(DispatchTransfer(draft, f"v111-upgrade-dispatch-{index}"))
-    print("Persisted two real V1-10 dispatches before changing App revision.", flush=True)
+    print("Persisted two real baseline dispatches before changing App revision.", flush=True)

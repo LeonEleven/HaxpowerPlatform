@@ -1,7 +1,7 @@
 # V1-12 盘点与库存版本验证
 
 2026-11-25，Asia/Shanghai。实现与隔离验证，生产验收未关闭。
-[Draft PR #25](https://github.com/LeonEleven/HaxpowerPlatform/pull/25) ·
+[已合并 PR #25](https://github.com/LeonEleven/HaxpowerPlatform/pull/25) ·
 [正式 B05 决策](DECISIONS.md#8-b05-正式盘点规则2026-11-25) ·
 [复现入口](../dev/v1/README.md#v1-12-非冻结盘点和库存版本验证)
 
@@ -55,8 +55,8 @@ Frappe/ERPNext v16.55.0、MariaDB 11.8.9 的锁定提交与镜像不变，上游
 | 原生边界 | 直接原生及系统记录 CRUD 拒绝；关闭期间、冻结、4.25 借贷 GL 拒绝 | 本地通过 |
 | 重估与代次 | 精确凭证作用域内正常 ERPNext 重估保持数量和版本；切换代次后旧任务拒绝 | 本地通过 |
 | 最新补充 | 同任务同键/异键并发、等值小数重放、实际 SQL 更新后故障 | 空站 CI 通过 |
-| 升级恢复 | 已合并 V1-11 真实库存、初始化中途故障、回填、重复 migrate、同点文件/配置/DB 恢复后盘点及移库继续 | 空站 CI 已验证初始化中断无残留。完整升级与恢复结果见 [PR 检查](https://github.com/LeonEleven/HaxpowerPlatform/pull/25/checks) |
-| 完整回归 | 47 项 Frappe、HTTP、原生出入库/移库、运行烟测及专属资源清理 | 待最新 CI 完成 |
+| 升级恢复 | 已合并 V1-11 真实库存、初始化中途故障、回填、重复 migrate、同点文件/配置/DB 恢复后盘点及移库继续 | 空站 CI 已验证初始化中断无残留。已通过完整 CI，含升级、重复迁移及同点恢复 |
+| 完整回归 | 47 项 Frappe、HTTP、原生出入库/移库、运行烟测及专属资源清理 | 已通过完整 CI |
 
 拒绝及故障用新连接比较原生单据、Bundle、有效 SLE、Batch、Bin、GL、任务、版本、请求及日志。
 测试只在持久化边界注入故障，实际库存调整和并发使用真实 ERPNext 与 MariaDB。
@@ -69,12 +69,17 @@ Frappe/ERPNext v16.55.0、MariaDB 11.8.9 的锁定提交与镜像不变，上游
 在第二个计数器写入时注入初始化故障；失败后不得留下 Ready 代次或部分记录，也不能放开数量执行。
 重复迁移只验证，不重置版本。备份恢复包含数据库、站点配置、公私文件；恢复后需用同一代次完成已确认任务。
 
-A06 继续保留 V1-13 审批和 V1-20 发布回归条件。V1-13 待审批不写数量，真正执行时调用
-`stock_count.service.complete` 重验权限、revision、代次、范围/桶及原生事实。已生效盘点错误等待 V1-14 反向纠错。
+A06 继续保留 V1-13 审批和 V1-20 发布回归条件。V1-13 待审批不写数量，批准时复用
+`stock_count.service` 的执行校验，重验权限、revision、代次、范围/桶及原生事实。已生效盘点错误等待 V1-14 反向纠错。
 当前共享守卫与全量受管历史核对的锁耗时须在生产规模评估。B11/B12 的灾后放行及外部任务政策未自行决定。
 
 空站全套盘点矩阵、既有原生收发和移库回归、V1-11 基线生成及回填中途失败回滚已由 [Actions 45536943999](https://github.com/LeonEleven/HaxpowerPlatform/actions/runs/45536943999) 记录。该轮在升级后日志表索引顺序比较处失败，后续运行验证修正。
 
-[Actions 45559951065](https://github.com/LeonEleven/HaxpowerPlatform/actions/runs/45559951065) 确认从已合并 V1-11 升级保留原生与业务事实，并回填含归零和在途的 21 个历史桶。升级站 47 项 Frappe 测试通过。随后，旧执行内核探针在调用方 Decimal 精度设为 2 时暴露全量对账的精度依赖。现已为对账建立独立精度上下文，完整复跑见 PR 检查。
+[Actions 45559951065](https://github.com/LeonEleven/HaxpowerPlatform/actions/runs/45559951065) 确认从已合并 V1-11 升级保留原生与业务事实，并回填含归零和在途的 21 个历史桶。升级站 47 项 Frappe 测试通过。随后，旧执行内核探针在调用方 Decimal 精度设为 2 时暴露全量对账的精度依赖。现已为对账建立独立精度上下文，完整复跑已经通过。
 
 本地已升级站在纳入正式盘点事实后两次 migrate，库存、任务、代次与计数器摘要均为 `65c4493ff43144a9044caf094701acc7bbe582419a38e611150008fbf46b33e5`。注入迁移失败后从同一点恢复数据库、站点配置及公私文件，摘要相同。恢复站实际生效了备份中已确认的盘点任务。
+
+
+2026-11-25 核对，PR #25 的完整 `isolated-install-and-migrate` 作业于 15:18（Asia/Shanghai）成功完成，
+项目负责人已手动合并，main 为 `66220768e4bfed72cf455a862acb74b0ff44b9c9`。
+[通过的完整 CI](https://github.com/LeonEleven/HaxpowerPlatform/actions/runs/45561795379/job/139026998758)

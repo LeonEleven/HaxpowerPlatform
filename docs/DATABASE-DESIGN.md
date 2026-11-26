@@ -163,8 +163,7 @@ mode，区分明确选择无批次与未选择。
 
 `system_settings(key, value, updated_by, updated_at)`。
 
-V1 至少包括 `inventory_approval_enabled` 和
-`allow_creator_self_approval`。
+V1 使用站点级 `inventory_approval_enabled`。授权创建人自审遵循 D019。
 
 ## 7. 未来估值扩展（V1 不启用）
 
@@ -214,3 +213,13 @@ V1-09 沿用 V1-08 表结构。升级验收比较应用迁移前后的合成历�
 `HP V1 Inventory Epoch` 是受保护的初始化代次。`HP V1 Inventory Version` 保存 Company、Location、scope、SKU、非空批次身份键、generation、精确整数文本 counter 和数量历史身份摘要，不存库存余额。LOCATION/SKU/BUCKET 分开计数，NO_BATCH 使用非空键；归零桶保留历史。
 
 `HP V1 Stock Count` 与同 ID 的 Stock Document 组合成任务头，保留服务端截止、范围、快照身份、代次、范围版本及前后重盘引用。`HP V1 Stock Count Line` 保存稳定行 ID、明确批次、账面/实盘/差异的无损十进制文本、桶版本、确认标记、发现标记、人员/时间及备注。未确认数量为 NULL；实盘 0 是独立的显式确认。任务内 bucket_key 唯一，避免 NULL 唯一索引歧义。完成复用请求和日志，quantity_effect=None 专用于显式无数量完成，不伪造原生引用。系统记录无普通 CRUD 权限。
+
+
+### V1-13 持久化映射
+
+`HP V1 Approval Settings` 唯一站点行记录开关和 revision，`HP V1 Approval Setting Change`
+追加前后值、操作者、服务端时间及原因。`HP V1 Approval Submission` 固化单据版本、人员、
+配置版本、审批要求及规范化负载摘要。盘点负载包括原快照、代次、范围、账面、实盘、逐桶版本及
+发现桶证据。`HP V1 Approval Event` 追加状态事件及批准失败，关联实际操作和原生身份。
+`HP V1 Approval Request` 保存非数量动作的幂等结果；库存事实继续关联原有的库存请求与操作日志。
+业务单保存当前提交 ID，迁移仅添加可空字段，对 V1-12 已完成记录保留原身份和原请求。

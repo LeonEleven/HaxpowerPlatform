@@ -47,7 +47,8 @@ class SubmitReceipt:
 @dataclass(frozen=True)
 class ReceiptResult:
     document_id: str
-    operation_id: str
+    operation_id: str | None
     status: str
     revision: int
     lines: tuple[ReceiptLine, ...]
+    submission_id: str | None = None
