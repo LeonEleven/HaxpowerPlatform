@@ -135,9 +135,10 @@ def compete(site, company, actor, line, *, repeatable_read=False):
 
     read_source = native.availability.read_source
 
-    def observe_locked(company, pairs, skus, *, posting_at=None, locked=True):
-        require(locked, "stock writer attempted a nonlocking availability read")
-        state = read_source(company, pairs, skus, posting_at=posting_at, locked=locked)
+    def observe_locked(company, pairs, skus, *, posting_at=None, **read_options):
+        # The upgrade rehearsal also runs this probe on the merged V1-14 App.
+        require(read_options.get("locked", True), "stock writer attempted a nonlocking availability read")
+        state = read_source(company, pairs, skus, posting_at=posting_at, **read_options)
         if posting_at is not None:
             _, consistent_qty = read_snapshot(frappe.db)
             locked_reads.append((consistent_qty, state[0][0][item, leaf, batch_name]))
@@ -380,7 +381,7 @@ def check_precision_and_integrity(company, line):
 
     balances = stock._balances
 
-    def inconsistent_read(company, pairs, *, error, posting_at=None, scales=None, locked=True):
+    def inconsistent_read(company, pairs, *, error, posting_at=None, scales=None, **read_options):
         db = frappe.db
         sql = db.sql
 
@@ -400,7 +401,7 @@ def check_precision_and_integrity(company, line):
             return rows
 
         with patch.object(db, "sql", corrupt_query):
-            return balances(company, pairs, error=error, posting_at=posting_at, scales=scales, locked=locked)
+            return balances(company, pairs, error=error, posting_at=posting_at, scales=scales, **read_options)
 
     for mismatch in ("Bin", "missing Bundle", "quantity precision"):
         with patch.object(stock, "_balances", inconsistent_read):
