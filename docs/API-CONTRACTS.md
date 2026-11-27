@@ -99,7 +99,7 @@ revision、submission ID 和可空的 operation ID。原键同负载重放先做
 
 入库、出库、移库和盘点正式提交都需显式传 `batchSelection`。缺少选择或 `mode` 时返回 `BATCH_SELECTION_REQUIRED`。未知模式和额外字段返回 `INVALID_BATCH_SELECTION`。`BATCH` 要求非空字符串，`NO_BATCH` 只接受 `mode`，库存响应中的 `batch` 为 `null`。
 
-V1-06 的候选规则可通过内部预览返回原文、候选值、策略版本和确认状态。裁剪首尾空白时，写入要求确认同一预览。若既有记录的规范键相同且原文不同，返回 `BATCH_NORMALIZATION_COLLISION` 并保留原记录。B03 审定后，正式业务命令按对应仓库与操作权限接入，业务响应和错误只使用领域 ID、真实批次文本或 `null`。
+V1-06 的候选规则可通过内部预览返回原文、候选值、策略版本和确认状态。裁剪首尾空白时，写入要求确认同一预览。若既有记录的规范键相同且原文不同，返回 `BATCH_NORMALIZATION_COLLISION` 并保留原记录。B03 已批准，正式策略版本、兼容性及原文处理由后续工程实现。正式业务命令按对应仓库与操作权限接入，业务响应和错误只使用领域 ID、真实批次文本或 `null`。
 
 [候选规则](ERPNEXT-V1-ADAPTATION-BOUNDARIES.md#批次输入规范) · [内部服务](TECHNICAL-DESIGN.md#v1-06-批次映射和事务)
 
@@ -189,7 +189,7 @@ Bench 中的内部接口为 `haxpower_v1.inventory.receipt.service.create_draft`
 
 `submit(SubmitIssue)` 需要草稿及幂等键。响应包含单据 ID、操作 ID、状态、版本及原行的领域信息。同键同负载在重新授权后返回原结果。并发竞争中，无法满足任一源桶需求的请求返回 `INSUFFICIENT_STOCK` 并回滚。未知或漂移的批次映射返回 `BATCH_MAPPING_UNAVAILABLE`。原生数量事实存在差异时返回 `ISSUE_NATIVE_RECONCILIATION_FAILED`。
 
-`get_availability(company, sku_id, source_location_id, batch)` 检查 ISSUE 操作权限及源仓范围，返回指定桶的 Decimal 数量字符串、库存 UOM 和领域标识。无批次返回 `batch=null`。合同中的三个接口目前仅由明确启用的独立合成 Bench 使用。员工 HTTP 写入口待 B01、B03、B12 和正式授权确认。
+`get_availability(company, sku_id, source_location_id, batch)` 检查 ISSUE 操作权限及源仓范围，返回指定桶的 Decimal 数量字符串、库存 UOM 和领域标识。无批次返回 `batch=null`。合同中的三个接口目前仅由明确启用的独立合成 Bench 使用。正式员工数量 HTTP 写入口保持关闭，须通过发布验收并取得明确授权。
 
 ## 12. V1-10 内部移库 DTO
 
@@ -249,3 +249,9 @@ Excel 列与相应查询的授权字段一致。状态及下载依文件生成�
 省略 `batch` 时遍历现有桶。显式 JSON null 是无批次。字符串按业务批次身份精确匹配。响应同时可提供领域 `batch_id`。数量使用十进制字符串。日期为站点业务时区下的 inclusive YYYY-MM-DD，实际比较采用开始当天零时至结束次日零时的半开区间。流水用原生 `posting_datetime`，以操作、行及桶标识打破同时间顺序。期间行包含期初、增加、减少、期末和动作分类。物理和双侧授权在途各有独立的桶类型。在途详情使用领域移库行，发出、实收、退回和剩余可核对。
 
 普通查询与导出不通过浏览器或共享代理缓存。未知或不可读资源统一权限拒绝，原生事实不一致时员工使用 `INVENTORY_READ_UNAVAILABLE`。正式员工数量写 API 的放行由后续验收控制。
+
+## V1-16 与 V1-17 拟议契约边界
+
+- 后续目录创建由服务端分配正式规格及 SKU 编码，旧编码通过授权的历史标识查询解析。主数据迁移使用来源映射和稳定领域 ID。继续执行产品技术字段、筛选、导出和撤权约束。
+- 期初预览、文件访问与审核重验权限及仓库范围。返回业务标识、清洗和版本信息，原生 ID 和文件物理路径保留于服务端。未知批次、未盘点与实盘零须明确区分。冻结后的内容变更生成新版本并重新审核及签核。
+- V1-17 入账服务校验签核版本与摘要，按分组幂等及原生事务入账并支持续跑及对账。具体文件字段、路由、DTO 和状态机由正式任务评审。正式员工库存数量 HTTP 写入保持关闭。

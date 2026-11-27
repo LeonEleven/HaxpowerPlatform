@@ -1,6 +1,6 @@
 # HaxpowerPlatform
 
-HaxpowerPlatform 是面向船舶配件企业的库存管理平台。正式 V1 使用 ERPNext v16 和独立的 `haxpower_v1` Frappe App。V1-01 至 V1-15 已完成工程阶段验收。下一项为 V1-16，先完成业务需求确认，再按 V1 Backlog 推进。
+HaxpowerPlatform 是面向船舶配件企业的库存管理平台。正式 V1 使用 ERPNext v16 和独立的 `haxpower_v1` Frappe App。V1-01 至 V1-15 已完成工程阶段验收。B01、B03、B10 业务规则已批准。V1-16 拆分提案经文档评审与手动合并后作为规划基线，各工程任务等待实施授权。 [V1-16 需求及规划](docs/V1-16-REQUIREMENTS.md)
 
 ## 项目目标
 

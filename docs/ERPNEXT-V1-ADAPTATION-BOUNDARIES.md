@@ -39,7 +39,7 @@ Stock User、Stock Manager 或 Item Manager 角色的用户仍经过同一规则
 | Stock Entry、Stock Reconciliation、Purchase Receipt、Purchase Invoice、Delivery Note、Sales Invoice 等 | 原生库存及上下游单据的 HTTP 读写均关闭。已登记 ORM 守卫扫描单据及明细的 Item、Warehouse 和 Batch 链接，包括更新前的引用，并在提交、取消与生命周期操作时阻止受管引用。 |
 | SLE、Bin、Batch、Serial No 和 Serial and Batch Bundle | HTTP 关闭。ORM 守卫识别受管 Item、库位、保留前缀、Batch 的 Item 归属和持久映射。V1-06 仅在绑定当前身份、SKU、映射和原生记录的内部范围内允许 Batch 创建。 |
 | 取消、删除、改名、导入和批量动作 | 受管资源的 HTTP 生命周期操作及全部原生库存导入、批量操作关闭。Item、Warehouse 映射生命周期另有 ORM 守卫。 |
-| Stock Balance、Stock Ledger、Prepared Report、打印、File、私有文件下载及导出 | HTTP 关闭。V1-15 接入按仓授权的报表与导出，V1-16 接入受控导入。公共静态文件目录仅承载公开页面资产，受限材料须按业务文件流程入库。 |
+| Stock Balance、Stock Ledger、Prepared Report、打印、File、私有文件下载及导出 | HTTP 关闭。V1-15 接入按仓授权的报表与导出，V1-16C 拟接入受控上传及清洗。公共静态文件目录仅承载公开页面资产，受限材料须按业务文件流程入库。 |
 | 账簿重估、公司交易清理、排队任务 | 原生重估与交易清理 HTTP 入口关闭。迁移停止已登记的原生重估、账簿改名、批量重试、补货和序列号维护计划。Worker 拒绝已登记的计划任务及队列调用，维护 DocType 在存在受管映射时拒绝 ORM 操作。生产队列和站点运维权限由 B11 逐项复核。 |
 
 合成验证命令及结果见 [V1 开发环境](../dev/v1/README.md#v1-05-权限验证)。校验结果覆盖
@@ -48,7 +48,7 @@ Stock User、Stock Manager 或 Item Manager 角色的用户仍经过同一规则
 
 ## 批次输入规范
 
-V1-06 的 `b03-candidate-1` 源于 Stage 2B。它只在明确标记的合成样本上开放写入。正式字符等价、长度、历史例外和归并签核均待 B03 审定。
+V1-06 的 `b03-candidate-1` 源于 Stage 2B。它只在明确标记的合成样本上开放写入。以下保留候选实现的历史语义。B03 已批准正式规则，后续工程评估新策略版本、历史原文及映射兼容。 [正式规则](DECISIONS.md#b03-批次身份与历史清洗)
 
 | 输入 | 服务端处置 |
 | --- | --- |
@@ -58,7 +58,7 @@ V1-06 的 `b03-candidate-1` 源于 Stage 2B。它只在明确标记的合成样�
 | `BATCH` 内为空字符串、全空白或 JSON null | 拒绝作为真实批次。确认无批次时改传 `NO_BATCH`。 |
 | 单个或多个空引号及引号之间纯空白 | 返回需确认的错误，覆盖常见 ASCII、弯引号、全角和角引号。人工确认无批次后改传 `NO_BATCH`，确有意义的历史编码进入例外复核。保存 `"STD61"` 等有内容引号的文本，拒绝自动剥除引号。 |
 | 命名空间或控制字符异常 | 保留前缀区分为 `HP-NB-` 和 `HP-RB-`，同时保留其大小写和兼容字符变体。拒绝控制字符、不可打印字符和尖括号，允许 Unicode 空格分隔符。候选长度上限为 80 个 Unicode 码点，原始输入上限为 256 个码点。 |
-| 确认或碰撞 | 只裁剪首尾空格分隔符，原文和候选值一起返回。有变化时须确认对应策略版本和本次预览。同一 SKU 的既有键若对应不同原文，拒绝复用或改写，留待 B03 复核。 |
+| 确认或碰撞 | 只裁剪首尾空格分隔符，原文和候选值一起返回。有变化时须确认对应策略版本和本次预览。同一 SKU 的既有键若对应不同原文，拒绝复用或改写，进入历史冲突审核。 |
 
 适配层为每个稳定映射 ID 创建一个原生 Batch，填入固定原生 Item，查回复用时复核正反向归属、映射状态和原生禁用标志。受管 Batch 的 ORM 改绑、禁用、删除、改名和合并均拒绝。站点管理员可在 Bench 检查孤立 Batch、命名空间冲突及状态异常。员工 API、报表、导出、业务日志和普通错误仅返回领域信息。
 
@@ -79,7 +79,7 @@ V1-06 的 `b03-candidate-1` 源于 Stage 2B。它只在明确标记的合成样�
 
 原生适配向 ERPNext v16.55.0 的 `Stock Entry.insert()` 与 `submit()` 提交 Material Receipt。每行设置原生目标叶仓、库存 UOM、单位换算率 1、受管 Item 和精确批次。锁定版本在 `make_bundle_using_old_serial_batch_fields` 生成独立的入向 Bundle，并在 SLE 的提交路径中提交它。入库的 NO_BATCH 行使用 SKU 独立的系统 Batch。用户输出保留领域批次选择。
 
-原有守卫仅在当前收货事务和已核准的原生对象上允许对应写入。普通员工原生 REST/Desk 和正式收货 HTTP 仍关闭。禁止正式 Stock Entry 或 Bundle 被普通路径取消、删除或改量。受控连接保留提前提交与任意回调的拒绝，兼容首次 Bin 创建的保存点及 Frappe 文档缓存失效机制。B01、B03、B12 仍需业务审定。
+原有守卫仅在当前收货事务和已核准的原生对象上允许对应写入。普通员工原生 REST/Desk 和正式收货 HTTP 仍关闭。禁止正式 Stock Entry 或 Bundle 被普通路径取消、删除或改量。受控连接保留提前提交与任意回调的拒绝，兼容首次 Bin 创建的保存点及 Frappe 文档缓存失效机制。B01 与 B03 已批准，正式启用仍需工程验证；B12 正式原生设置待确认。
 
 锁定版 `update_entries_after.set_precision` 在未配置原生精度时为 SLE 累计量使用两位小数。合成站设定三位前，实测两行的有效 SLE 为 1.125 和 0.125，但 Bin 被逐次舍入为 1.26。明确配置三位后，累计量、有效 SLE、Bundle、Batch 和 Bin 对齐。适配器在过账前拒绝缺少原生精度或原生精度低于 SKU 精度的站点。 [ERPNext 锁定源码](https://github.com/frappe/erpnext/blob/8e10a348daaa93853de8c36dc55ec789a440c219/erpnext/stock/stock_ledger.py#L765-L769)
 
