@@ -1,9 +1,10 @@
 """Quantity epochs and monotone range counters; never a second quantity ledger.
 
-Every caller holds the shared stock guard. Native identity fingerprints detect
+Writers hold the shared stock guard. Snapshot readers use nonlocking reads. Native fingerprints detect
 out-of-band quantity edits while ignoring valuation/modified-only maintenance.
 """
 from collections import defaultdict
+from dataclasses import asdict
 from decimal import Decimal, localcontext
 from hashlib import sha256
 import json
@@ -40,8 +41,8 @@ def insert(doctype, *, name=None, **fields):
     return name
 
 
-def epoch():
-    row = stock.current(EPOCH, 'inventory', ('generation', 'state'))
+def epoch(*, locked=True):
+    row = stock.current(EPOCH, 'inventory', ('generation', 'state'), locked=locked)
     if not row or row.state != 'Ready':
         raise StockError('INVENTORY_VERSION_NOT_READY')
     return row.generation
@@ -76,35 +77,58 @@ def read(company, location, scope, sku=None, kind=None, batch_id=None):
     return int(row.counter) if row else 0
 
 
-def _entries():
+def _entries(*, locked=True, company=None):
     """Reconcile all managed native quantity history, including zeroed buckets."""
     from ..catalog.sku_persistence import SKU
     from ..warehouse.persistence import LOCATION, WAREHOUSE
     from .batch.persistence import MAPPING
     from .batch.service import _load_sku
+    from .batch.dto import BatchError
     from .availability import read_source
 
-    skus = {r.native_item: r for r in frappe.db.get_values(SKU, {}, ('name', 'native_item'), as_dict=True, for_update=True)}
+    lock = " FOR UPDATE" if locked else ""
+    skus = {r.native_item: r for r in frappe.db.get_values(SKU, {}, ('name', 'native_item'), as_dict=True, for_update=locked)}
     locations = {r.native_warehouse: r for r in frappe.db.sql(
         f'SELECT l.name,l.native_warehouse,w.company FROM `tab{LOCATION}` l '
-        f'JOIN `tab{WAREHOUSE}` w ON w.name=l.warehouse FOR UPDATE', as_dict=True)}
+        f'JOIN `tab{WAREHOUSE}` w ON w.name=l.warehouse' + lock, as_dict=True)}
     mappings = {r.native_batch: r for r in frappe.db.get_values(
-        MAPPING, {}, ('name','sku','kind','native_batch'), as_dict=True, for_update=True)}
+        MAPPING, {}, ('name','sku','kind','native_batch'), as_dict=True, for_update=locked)}
+    if company is not None:
+        locations = {name: row for name, row in locations.items() if row.company == company}
     result, pairs = defaultdict(list), defaultdict(set)
     # Include cancelled rows in the scan so corruption cannot disappear silently.
+    where, params = "", ()
+    if company is not None:
+        where = " WHERE s.company=%s OR s.warehouse IN %s"
+        params = (company, tuple(locations) or ("",))
+        if frappe.db.sql("SELECT COUNT(*) FROM `tabStock Ledger Entry` s" + where, params)[0][0] > 200_000:
+            raise StockError("INVENTORY_READ_HISTORY_LIMIT")
+
     rows = frappe.db.sql('''SELECT s.name,s.company,s.item_code,s.warehouse,
         CAST(s.actual_qty AS CHAR) quantity,s.serial_and_batch_bundle bundle,s.voucher_type,s.voucher_no,
-        s.voucher_detail_no,s.docstatus,s.is_cancelled FROM `tabStock Ledger Entry` s FOR UPDATE''', as_dict=True)
+        s.voucher_detail_no,s.docstatus,s.is_cancelled FROM `tabStock Ledger Entry` s''' + where + lock,
+                         params, as_dict=True)
     link_counts = defaultdict(int)
-    for parent_type,parent_id,detail_id,company in frappe.db.sql(f'''SELECT l.parent_type,l.parent_id,l.detail_id,d.company
+    company_filter = " AND d.company=%s" if company is not None else ""
+    company_params = (company,) if company is not None else ()
+    for parent_type,parent_id,detail_id,link_company in frappe.db.sql(f'''SELECT l.parent_type,l.parent_id,l.detail_id,d.company
         FROM `tab{stock.LINK}` l JOIN `tab{stock.LOG}` o ON o.name=l.operation_id
-        JOIN `tab{stock.DOCUMENT}` d ON d.name=o.document_id WHERE o.status='Effective' FOR UPDATE'''):
-        link_counts[parent_type,parent_id,detail_id,company] += 1
+        JOIN `tab{stock.DOCUMENT}` d ON d.name=o.document_id WHERE o.status='Effective'
+        ''' + company_filter + lock, company_params):
+        link_counts[parent_type,parent_id,detail_id,link_company] += 1
+    parent_filters = {"company": company} if company is not None else {}
     parent_status = {(table,name):status for table in ('Stock Entry','Stock Reconciliation')
-                     for name,status in frappe.db.get_values(table,{},('name','docstatus'),for_update=True)}
+                     for name,status in frappe.db.get_values(table,parent_filters,('name','docstatus'),for_update=locked)}
     parts_by_bundle = defaultdict(list)
+    bundle_filter = ""
+    bundle_params = ()
+    if company is not None:
+        bundle_filter = " WHERE parent IN %s"
+        bundle_params = (tuple({row.bundle for row in rows if row.bundle}) or ("",),)
     for parent,name,batch,qty,status,cancelled in frappe.db.sql('''SELECT parent,name,batch_no,CAST(qty AS CHAR),
-        docstatus,is_cancelled FROM `tabSerial and Batch Entry` ORDER BY name FOR UPDATE'''):
+        docstatus,is_cancelled FROM `tabSerial and Batch Entry`''' + bundle_filter + ' ORDER BY name' + lock,
+        bundle_params,
+    ):
         parts_by_bundle[parent].append((name,batch,qty,status,cancelled))
     seen_native_links = set()
     for row in rows:
@@ -112,28 +136,34 @@ def _entries():
             continue
         if (row.item_code not in skus or row.warehouse not in locations or row.docstatus != 1 or row.is_cancelled
                 or row.company != locations[row.warehouse].company):
-            raise StockError('INVENTORY_NATIVE_HISTORY_INVALID')
+            raise StockError('INVENTORY_NATIVE_HISTORY_INVALID', evidence=dict(sle=row.name, check="SLE_SCOPE_OR_STATUS"))
         sku, location = skus[row.item_code], locations[row.warehouse]
         if (link_counts[row.voucher_type,row.voucher_no,row.voucher_detail_no,row.company] != 1
                 or parent_status.get((row.voucher_type,row.voucher_no)) != 1):
-            raise StockError('INVENTORY_NATIVE_HISTORY_INVALID')
+            raise StockError('INVENTORY_NATIVE_HISTORY_INVALID', evidence=dict(sle=row.name, check="OPERATION_LINK"))
         seen_native_links.add((row.voucher_type,row.voucher_no,row.voucher_detail_no,row.company))
         parts = parts_by_bundle.get(row.bundle, ())
         if not parts:
-            raise StockError('INVENTORY_NATIVE_HISTORY_INVALID')
+            raise StockError('INVENTORY_NATIVE_HISTORY_INVALID', evidence=dict(sle=row.name, bundle=row.bundle,
+                                                                            check="BUNDLE_ENTRIES"))
         for name, batch, qty, status, cancelled in parts:
             mapping = mappings.get(batch)
             if not mapping or mapping.sku != sku.name or status != 1 or cancelled:
-                raise StockError('INVENTORY_NATIVE_HISTORY_INVALID')
+                raise StockError('INVENTORY_NATIVE_HISTORY_INVALID', evidence=dict(sle=row.name, part=name, batch=batch,
+                                                                                check="BATCH_MAPPING_OR_ENTRY_STATUS"))
             bucket = Bucket(row.company, sku.name, location.name, mapping.kind,
                             mapping.name if mapping.kind == 'BATCH' else None)
             result[bucket].append((row.name, row.quantity, row.bundle, row.voucher_type,row.voucher_no,
                                    row.voucher_detail_no,name,batch,qty))
         pairs[row.company].add((row.item_code, row.warehouse))
-    if seen_native_links != {key for key in link_counts if key[0] in ('Stock Entry','Stock Reconciliation')}:
-        raise StockError('INVENTORY_NATIVE_HISTORY_INVALID')
+    managed_links = {key for key in link_counts if key[0] in ('Stock Entry', 'Stock Reconciliation')}
+    if missing := managed_links - seen_native_links:
+        raise StockError('INVENTORY_NATIVE_HISTORY_INVALID',
+                         evidence=dict(check="LINK_WITHOUT_SLE", links=sorted(missing)[:100], total=len(missing)))
     # A stray Bin or stale Batch is checked even in the absence of a live SLE.
-    for item, leaf in frappe.db.sql('SELECT item_code,warehouse FROM `tabBin` FOR UPDATE'):
+    bin_scope = (' LEFT JOIN `tabWarehouse` w ON w.name=b.warehouse WHERE w.company=%s OR b.warehouse IN %s'
+                 if company is not None else "")
+    for item, leaf in frappe.db.sql('SELECT b.item_code,b.warehouse FROM `tabBin` b' + bin_scope + lock, params):
         if item in skus or leaf in locations:
             if item not in skus or leaf not in locations:
                 raise StockError('INVENTORY_NATIVE_HISTORY_INVALID')
@@ -142,10 +172,13 @@ def _entries():
     # context must not round those totals or affect the inventory transaction.
     with localcontext() as context:
         context.prec = 64
-        for company, selected in pairs.items():
+        for pair_company, selected in pairs.items():
             sku_ids = sorted({item for item, _ in selected})
-            managed_skus = tuple(_load_sku(skus[item].name, locked=True) for item in sku_ids)
-            read_source(company, selected, managed_skus)
+            try:
+                managed_skus = tuple(_load_sku(skus[item].name, locked=locked) for item in sku_ids)
+            except BatchError as error:
+                raise StockError(error.code, evidence=dict(native_items=sku_ids[:100])) from None
+            read_source(pair_company, selected, managed_skus, locked=locked)
     return result
 
 
@@ -153,12 +186,13 @@ def facts():
     return {bucket:digest(sorted(entries)) for bucket,entries in _entries().items()}
 
 
-def verify(*, include_entries=False):
-    generation, entries = epoch(), _entries()
+def verify(*, include_entries=False, locked=True, company=None):
+    generation, entries = epoch(locked=locked), _entries(locked=locked, company=company)
+    filters = {"company": company} if company is not None else {}
     current = {bucket:digest(sorted(rows)) for bucket,rows in entries.items()}
-    recorded = frappe.db.get_values(VERSION, {'scope':'BUCKET'},
+    recorded = frappe.db.get_values(VERSION, dict(filters, scope='BUCKET'),
                                    ('company','location_id','sku_id','batch_key','generation','fact_digest'),
-                                   as_dict=True, for_update=True)
+                                   as_dict=True, for_update=locked)
     expected = {}
     for row in recorded:
         if row.generation != generation:
@@ -166,10 +200,16 @@ def verify(*, include_entries=False):
         kind, bid = ('NO_BATCH',None) if row.batch_key == 'NO_BATCH' else ('BATCH',row.batch_key.removeprefix('BATCH:'))
         expected[Bucket(row.company,row.sku_id,row.location_id,kind,bid)] = row.fact_digest
     if current != expected:
-        raise StockError('INVENTORY_QUANTITY_HISTORY_CHANGED')
-    all_rows = frappe.db.get_values(VERSION, {},
+        differences = [bucket for bucket in current.keys() | expected.keys()
+                       if current.get(bucket) != expected.get(bucket)]
+        differences.sort(key=lambda bucket: (bucket.location_id, bucket.sku_id, bucket.batch_id or ""))
+        raise StockError('INVENTORY_QUANTITY_HISTORY_CHANGED', evidence=dict(
+            total=len(differences), buckets=[dict(asdict(bucket), recorded=expected.get(bucket),
+                                                observed=current.get(bucket)) for bucket in differences[:100]],
+        ))
+    all_rows = frappe.db.get_values(VERSION, filters,
         ('name','company','location_id','scope','sku_id','batch_key','generation','counter'),
-        as_dict=True, for_update=True)
+        as_dict=True, for_update=locked)
     required = {identity(*key) for bucket in current for key in keys(bucket)}
     if {r.name for r in all_rows} != required:
         raise StockError('INVENTORY_VERSION_NOT_READY')

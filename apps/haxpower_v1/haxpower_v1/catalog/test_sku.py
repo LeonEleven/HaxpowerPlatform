@@ -9,8 +9,11 @@ from frappe import client
 from frappe.tests import IntegrationTestCase
 
 from ..adapters.erpnext import item
-from . import service, sku
-from .dto import INACTIVE, CategoryData, SpecificationData
+from . import read, service, sku
+from .dto import (
+    BOOLEAN, DATE, DECIMAL, INACTIVE, MULTI, MULTI_SELECT, SINGLE, SINGLE_SELECT, TEXT,
+    AttributeData, CategoryData, OptionData, SpecificationData, TemplateData,
+)
 from .persistence import MAINTAINER
 from .sku_dto import Alias, BrandData, Identifier, SKUData
 from .sku_persistence import ALIAS, IDENTIFIER, SKU
@@ -102,6 +105,51 @@ class TestSKU(IntegrationTestCase):
         self.assertEqual({doctype: frappe.db.count(doctype) for doctype in NO_STOCK_WRITES}, baseline)
         with self.assertRaises(frappe.UniqueValidationError):
             sku.create_sku(replace(self.data, code=self.code.lower(), brand=other.id))
+
+    def test_employee_search_uses_typed_values_and_sku_owned_fields(self):
+        category = service.save_category(CategoryData(code=f"{self.code}-CAT", display_name="活塞环"))
+        attributes, inputs = {}, {}
+        options = {}
+        for kind, value in ((TEXT, "机型/甲"), (DECIMAL, "320.0300"), (BOOLEAN, False), (DATE, "2024-02-29"),
+                            (SINGLE_SELECT, "History-Argon"), (MULTI_SELECT, "Bronze")):
+            definition = service.save_attribute(AttributeData(code=f"{self.code}-{kind}",
+                                                              display_name=kind, data_type=kind))
+            attributes[kind] = definition.id
+            service.save_template(TemplateData(category=category.id, attribute=definition.id, searchable=True,
+                                               value_mode=MULTI if kind == MULTI_SELECT else SINGLE))
+            if kind in (SINGLE_SELECT, MULTI_SELECT):
+                option = service.save_option(OptionData(attribute=definition.id, option_key=value, display_name=value))
+                options[kind] = option
+                value = option.id
+            inputs[definition.id] = [value]
+        hidden = service.save_attribute(AttributeData(code=f"{self.code}-HIDDEN", display_name="Hidden", data_type=TEXT))
+        service.save_template(TemplateData(category=category.id, attribute=hidden.id, searchable=False))
+        inputs[hidden.id] = ["UnindexedTechnical"]
+        spec = service.create_specification(SpecificationData(code=f"{self.code}-SPEC", category=category.id,
+                                                               display_name="船用技术规格"), attributes=inputs)
+        historical = options[SINGLE_SELECT]
+        service.save_option(replace(historical.data, status=INACTIVE), record_id=historical.id)
+        data = replace(self.data, specification=spec.id)
+        a = sku.create_sku(data, identifiers=[Identifier(kind="OEM", value="V1/OEM-A")])
+        other = sku.save_brand(BrandData(code=f"{self.code}-B-READ", display_name="RIKEN"))
+        b = sku.create_sku(replace(data, code=f"{self.code}-B", brand=other.id),
+                           identifiers=[Identifier(kind="MANUFACTURER", value="V1/OEM-B")])
+        for query in ("活塞环　３２０ riken", "RIKEN 320 活塞环", "机型/甲 FALSE 2024-02-29 History-Argon Bronze riken",
+                      "riken v1/oem-b"):
+            self.assertEqual(sku.search_sku_ids(query, category=category.id), ((b.id,), 1))
+        for query in ("riken v1/oem-a", "UnindexedTechnical", "' OR 1=1"):
+            self.assertEqual(sku.search_sku_ids(query, category=category.id), ((), 0))
+        self.assertEqual(sku.search_sku_ids("320", category=category.id, attributes={attributes[DECIMAL]: "320"}),
+                         ((), 0))
+        self.assertEqual(sku.search_sku_ids("", category=category.id, attributes={
+            attributes[DECIMAL]: "320.03", attributes[MULTI_SELECT]: options[MULTI_SELECT].id,
+        }, limit=1, offset=0), ((a.id,), 2))
+        projection = read.by_ids((a.id,), details=True)[a.id]
+        values = {attribute["type"]: attribute["values"] for attribute in projection["specification"]["attributes"]}
+        self.assertEqual(values[SINGLE_SELECT][0]["display_name"], "History-Argon")
+        for query in ("x " * 11, "x" * 201):
+            with self.assertRaisesRegex(frappe.ValidationError, "PRODUCT_SEARCH_LIMIT_EXCEEDED"):
+                sku.search_sku_ids(query)
 
     def test_explicit_mapping_and_database_uniqueness(self):
         native = self.native_item(code=f"{self.code}-NATIVE")

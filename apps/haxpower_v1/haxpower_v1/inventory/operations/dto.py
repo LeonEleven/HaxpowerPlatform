@@ -8,9 +8,10 @@ from ..batch.dto import BatchKind
 
 
 class StockError(Exception):
-    def __init__(self, code):
+    def __init__(self, code, *, evidence=None):
         super().__init__(code)
         self.code = code
+        self.evidence = evidence
 
 
 class QuantitySign(StrEnum):

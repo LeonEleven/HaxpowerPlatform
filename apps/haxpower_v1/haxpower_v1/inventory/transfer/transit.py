@@ -24,19 +24,19 @@ DISPATCHED_STATUSES = (IN_TRANSIT, PARTIAL, COMPLETED, CLOSED_RETURN)
 COMMANDS = {stock.RECEIVE: "Receive Transfer", stock.RETURN: "Return Transfer"}
 
 
-def resolve(company):
+def resolve(company, *, locked=True):
     warehouses = frappe.db.get_values(
         WAREHOUSE, {"company": company, "kind": TRANSIT}, ("name", "company", "kind", "native_parent", "status"),
-        for_update=True, as_dict=True, order_by="name asc",
+        for_update=locked, as_dict=True, order_by="name asc",
     )
     locations = frappe.db.get_values(
         LOCATION, {"warehouse": ("in", [row.name for row in warehouses])},
-        ("name", "warehouse", "native_warehouse", "status"), for_update=True, as_dict=True, order_by="name asc",
+        ("name", "warehouse", "native_warehouse", "status"), for_update=locked, as_dict=True, order_by="name asc",
     ) if warehouses else ()
     if (
         len(warehouses) != 1 or warehouses[0].status != ACTIVE
         or len(locations) != 1 or locations[0].status != ACTIVE
-        or native_warehouse.mapping_status(locations[0], warehouses[0], locked=True) != "Verified"
+        or native_warehouse.mapping_status(locations[0], warehouses[0], locked=locked) != "Verified"
     ):
         raise StockError("TRANSFER_TRANSIT_UNAVAILABLE")
     return locations[0]
@@ -68,7 +68,7 @@ def status_for(remaining, received, returned):
     return CLOSED_RETURN if any(returned.values()) else COMPLETED
 
 
-def _originals(company, item_codes, leaf):
+def _originals(company, item_codes, leaf, *, locked=True):
     rows = frappe.db.sql(
         f"""
         SELECT own.name AS ownership_id, own.inward_sle, own.operation_id, own.native_detail,
@@ -89,8 +89,8 @@ def _originals(company, item_codes, leaf):
         LEFT JOIN `tab{LOCATION}` source ON source.name = line.source
         LEFT JOIN `tab{LOCATION}` target ON target.name = line.target
         WHERE own.transit_location = %s AND (sku.native_item IN %s OR sku.native_item IS NULL)
-        ORDER BY own.name FOR UPDATE
-        """, (leaf.name, tuple(sorted(item_codes))), as_dict=True,
+        ORDER BY own.name
+        """ + (" FOR UPDATE" if locked else ""), (leaf.name, tuple(sorted(item_codes))), as_dict=True,
     )
     originals = {}
     for row in rows:
@@ -107,7 +107,7 @@ def _originals(company, item_codes, leaf):
     return originals
 
 
-def _followups(originals):
+def _followups(originals, *, locked=True):
     if not originals:
         return ()
     return frappe.db.sql(
@@ -118,12 +118,12 @@ def _followups(originals):
         FROM `tab{store.LINK}` link
         LEFT JOIN `tab{store.LOG}` op ON op.name = link.operation_id
         WHERE link.ownership_id IN %s OR (link.line_id IN %s AND link.role <> 'Dispatch')
-        ORDER BY link.name FOR UPDATE
-        """, (tuple(originals), tuple(row.line_id for row in originals.values())), as_dict=True,
+        ORDER BY link.name
+        """ + (" FOR UPDATE" if locked else ""), (tuple(originals), tuple(row.line_id for row in originals.values())), as_dict=True,
     )
 
 
-def _native_legs(company, row, parent, source, target, original, role, quantity, bundles):
+def _native_legs(company, row, parent, source, target, original, role, quantity, bundles, *, locked=True):
     outgoing = original.native_entry if role == stock.RECEIVE else None
     detail = original.native_detail if outgoing else None
     bucket = Bucket(company, original.sku_id, original.source, original.batch_kind, original.batch_id)
@@ -143,31 +143,31 @@ def _native_legs(company, row, parent, source, target, original, role, quantity,
         stock.SLE, {"voucher_detail_no": row.name},
         ("name", "voucher_detail_no", "item_code", "warehouse", "company", "serial_and_batch_bundle",
          "actual_qty", "docstatus", "is_cancelled", "voucher_no", "voucher_type"),
-        as_dict=True, for_update=True,
+        as_dict=True, for_update=locked,
     )
     if len(posted) != 2 or any((sle.voucher_no, sle.voucher_type) != (parent.name, stock.ENTRY) for sle in posted):
         raise StockError(INCONSISTENT)
     by_leg = {(sle.voucher_detail_no, sle.warehouse): sle for sle in posted}
-    stock.verify_legs(company, parent.name, row, (leg, inward), by_leg, bundles, INCONSISTENT)
+    stock.verify_legs(company, parent.name, row, (leg, inward), by_leg, bundles, INCONSISTENT, locked=locked)
     return by_leg
 
 
-def reconcile(company, item_codes, leaf, buckets):
+def reconcile(company, item_codes, leaf, buckets, *, locked=True):
     """Check each native Transit SLE and its owner in both directions."""
     ledger = set(frappe.db.get_values(
         stock.SLE, {"company": company, "warehouse": leaf.native_warehouse, "item_code": ("in", sorted(item_codes)),
                     "docstatus": 1, "is_cancelled": 0},
-        "name", for_update=True, pluck=True,
+        "name", for_update=locked, pluck=True,
     ))
-    originals = _originals(company, item_codes, leaf)
+    originals = _originals(company, item_codes, leaf, locked=locked)
     parents, details, batches, bundles, covered = {}, {}, {}, set(), set()
     parent_operations, linked_details = {}, set()
 
     def native_rows(parent_id, detail_id, actor, operation):
         if parent_id not in parents:
-            if not store.current(stock.ENTRY, parent_id, "name"):
+            if not store.current(stock.ENTRY, parent_id, "name", locked=locked):
                 raise StockError(INCONSISTENT)
-            parent = parents[parent_id] = frappe.get_doc(stock.ENTRY, parent_id, for_update=True)
+            parent = parents[parent_id] = frappe.get_doc(stock.ENTRY, parent_id, for_update=locked)
             details.update((row.name, row) for row in parent.items)
         parent = parents[parent_id]
         row = details.get(detail_id)
@@ -185,7 +185,7 @@ def reconcile(company, item_codes, leaf, buckets):
         if batch_key not in batches:
             batches[batch_key] = frappe.db.get_value(
                 "HP V1 Batch Mapping", {"sku": original.sku_id, "kind": original.batch_kind, "native_batch": row.batch_no},
-                ("name", "original_text"), as_dict=True, for_update=True,
+                ("name", "original_text"), as_dict=True, for_update=locked,
             )
         mapping = batches[batch_key]
         original.native_batch = row.batch_no
@@ -199,14 +199,14 @@ def reconcile(company, item_codes, leaf, buckets):
             raise StockError(INCONSISTENT)
         original.mapping_id = mapping.name
         legs = _native_legs(company, row, parent, original.source_leaf, leaf.native_warehouse,
-                            original, stock.DISPATCH, stock._number(original.quantity), bundles)
+                            original, stock.DISPATCH, stock._number(original.quantity), bundles, locked=locked)
         if legs[row.name, leaf.native_warehouse].name != original.inward_sle:
             raise StockError(INCONSISTENT)
         covered.add(original.inward_sle)
 
     received, returned = defaultdict(Decimal), defaultdict(Decimal)
     effects, seen_lines, receive_details = [], set(), set()
-    for link in _followups(originals):
+    for link in _followups(originals, locked=locked):
         original = originals.get(link.ownership_id)
         if (
             not original or (link.line_id, link.document_id, link.original_operation)
@@ -222,7 +222,7 @@ def reconcile(company, item_codes, leaf, buckets):
             raise StockError(INCONSISTENT)
         quantity = stock._number(row.transfer_qty)
         target = original.target_leaf if link.role == stock.RECEIVE else original.source_leaf
-        legs = _native_legs(company, row, parent, leaf.native_warehouse, target, original, link.role, quantity, bundles)
+        legs = _native_legs(company, row, parent, leaf.native_warehouse, target, original, link.role, quantity, bundles, locked=locked)
         covered.add(legs[row.name, leaf.native_warehouse].name)
         seen_lines.add((link.operation_id, link.line_id))
         if link.role == stock.RECEIVE:
@@ -234,7 +234,7 @@ def reconcile(company, item_codes, leaf, buckets):
     if originals:
         native_receives = set(frappe.db.get_values(
             stock.DETAIL, {"ste_detail": ("in", sorted(row.native_detail for row in originals.values())), "docstatus": 1},
-            "name", for_update=True, pluck=True,
+            "name", for_update=locked, pluck=True,
         ))
         if native_receives != receive_details:
             raise StockError(INCONSISTENT)
@@ -261,7 +261,7 @@ def reconcile(company, item_codes, leaf, buckets):
     return lifecycle
 
 
-def verify_document(doc, lines, lifecycle):
+def verify_document(doc, lines, lifecycle, *, locked=True):
     from ...approval.service import dispatch_revision
     from ..operations.service import payload_digest
 
@@ -278,8 +278,8 @@ def verify_document(doc, lines, lifecycle):
         FROM `tab{store.LOG}` op
         LEFT JOIN `tab{store.REQUEST}` req ON req.name = op.request_id
         WHERE op.document_id = %s
-        ORDER BY op.result_revision FOR UPDATE
-        """, (doc.name,), as_dict=True,
+        ORDER BY op.result_revision
+        """ + (" FOR UPDATE" if locked else ""), (doc.name,), as_dict=True,
     )
     if not logs or logs[0].name != doc.effective_operation:
         raise StockError(INCONSISTENT)
@@ -289,7 +289,7 @@ def verify_document(doc, lines, lifecycle):
             effects[effect.operation].append(effect)
     remaining = {identity: stock._number(row.quantity) for identity, row in originals.items()}
     received, returned = defaultdict(Decimal), defaultdict(Decimal)
-    base = dispatch_revision(doc)
+    base = dispatch_revision(doc, locked=locked)
     for revision, log in enumerate(logs, base + 1):
         if (
             (log.request_status, log.request_actor, log.request_company, log.request_document)
@@ -303,7 +303,7 @@ def verify_document(doc, lines, lifecycle):
                     or log.reason != doc.reason or (log.result_status or IN_TRANSIT) != IN_TRANSIT):
                 raise StockError(INCONSISTENT)
             native_links = frappe.db.get_values(
-                store.LINK, {"operation_id": log.name}, ("line_id", "detail_id", "role"), for_update=True,
+                store.LINK, {"operation_id": log.name}, ("line_id", "detail_id", "role"), for_update=locked,
             )
             if len(native_links) != len(originals) or set(native_links) != {
                 (row.line_id, row.native_detail, stock.DISPATCH) for row in originals.values()

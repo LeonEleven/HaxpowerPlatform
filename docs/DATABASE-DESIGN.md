@@ -227,3 +227,7 @@ V1-09 沿用 V1-08 表结构。升级验收比较应用迁移前后的合成历�
 ### V1-14 纠错关系及长期留存
 
 纠错使用 Stock Document 和 Stock Document Line 保存请求内容。Stock Correction 共享业务单 ID，保存原操作、纠错行与原行映射及正常后续业务引用。不可变 Approval Submission 固化每次提交的关系、依据及专项政策。Correction Review 追加人工审核证据、意见、关闭信息和合法业务引用。Operation Log 和 Operation Native Link 连回原生调整，额度由有效原生事实复核。保护正式单据、盘点、审批、请求、审计和正式附件的长期留存，无自动删除任务或短期重放 TTL。
+
+### V1-15 导出记录和附件边界
+
+HP V1 Export 记录申请人、公司、报表、规范化条件、固定列、实际仓库覆盖、时间、文件字节、SHA-256、状态与期限。HP V1 Export Download 追加可核验下载记录。导出文件存于站点 `private/haxpower_v1/exports`，名称从领域 ID 派生。导出记录与文件可独立核对，恢复时使用同一数据库及文件备份点。V1-16 复用目录隔离、受控读取和完整性验证，另行配置其附件授权与生命周期。V1-15 不增加权威库存数量表。

@@ -94,3 +94,14 @@ def detail(company, operation_id):
                 "lines": [{**asdict(line), "effects": effects.get(line.line_id, []),
                            "original_line_id": related_lines.get(line.line_id),
                            "entitlement": entitlements.get(line.line_id)} for line in lines]}
+
+
+def business_operations(document_id, *, locked=True):
+    """Project effective operation history after the caller authorizes the document."""
+    rows = frappe.db.get_values(
+        stock.LOG, {"document_id": document_id, "status": "Effective"},
+        ("name", "action", "creation", "result_status"), as_dict=True, for_update=locked,
+        order_by="result_revision asc, name asc",
+    )
+    return [dict(id=row.name, action=row.action, created_at=row.creation, status=row.result_status)
+            for row in rows]

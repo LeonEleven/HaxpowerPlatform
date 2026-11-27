@@ -1,0 +1,105 @@
+{
+ "doctype": "DocType",
+ "name": "HP V1 Export",
+ "module": "HP V1",
+ "engine": "InnoDB",
+ "field_order": [
+  "company",
+  "requested_by",
+  "report",
+  "criteria",
+  "columns_json",
+  "warehouses_json",
+  "snapshot_at",
+  "sha256",
+  "file_size",
+  "row_count",
+  "status",
+  "failure_code",
+  "expires_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "company",
+   "label": "Company",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "requested_by",
+   "label": "Requested By",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "report",
+   "label": "Report",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "criteria",
+   "label": "Criteria",
+   "fieldtype": "Long Text",
+   "read_only": 1
+  },
+  {
+   "fieldname": "columns_json",
+   "label": "Columns Json",
+   "fieldtype": "Long Text",
+   "read_only": 1
+  },
+  {
+   "fieldname": "warehouses_json",
+   "label": "Warehouses Json",
+   "fieldtype": "Long Text",
+   "read_only": 1
+  },
+  {
+   "fieldname": "snapshot_at",
+   "label": "Snapshot At",
+   "fieldtype": "Datetime",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sha256",
+   "label": "Sha256",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "file_size",
+   "label": "File Size",
+   "fieldtype": "Int",
+   "read_only": 1
+  },
+  {
+   "fieldname": "row_count",
+   "label": "Row Count",
+   "fieldtype": "Int",
+   "read_only": 1
+  },
+  {
+   "fieldname": "status",
+   "label": "Status",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "failure_code",
+   "label": "Failure Code",
+   "fieldtype": "Data",
+   "read_only": 1
+  },
+  {
+   "fieldname": "expires_at",
+   "label": "Expires At",
+   "fieldtype": "Datetime",
+   "read_only": 1,
+   "search_index": 1
+  }
+ ],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "permissions": []
+}

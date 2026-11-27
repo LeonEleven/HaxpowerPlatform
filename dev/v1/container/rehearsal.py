@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import os
 import subprocess
+import shutil
 import sys
 import tarfile
 from tempfile import TemporaryDirectory
@@ -134,18 +135,12 @@ def verify_approval_install(state):
             "migration inferred historical approval facts")
 
 
-def verify_correction_upgrade(state, baseline, *, failed=False):
-    tables = state["corrections"]
-    require(set(tables) == {"HP V1 Stock Correction", "HP V1 Correction Review"}
-            and all(not table["rows"] for table in tables.values()),
-            "migration inferred historical corrections or missed the correction schema")
-    access = dict(state["access"])
-    extra = [role for role in access["roles"] if role["name"] == "HP V1 Correction Approve"]
-    require(len(extra) == (0 if failed else 1) and all(not role["desk_access"] for role in extra),
-            "specialist role was not installed at the correct migration boundary")
-    access["roles"] = [role for role in access["roles"] if role not in extra]
-    require(dict(state, access=access, corrections=baseline["corrections"]) == baseline,
-            "V1-14 migration altered pre-existing roles, state or quantity history")
+def verify_reporting_upgrade(state, baseline, *, failed=False):
+    require(dict(state, reporting=baseline["reporting"]) == baseline,
+            "V1-15 migration changed pre-existing native quantity, domain histories or grants")
+    if not failed:
+        require(state["reporting"] == {"HP V1 Export": [], "HP V1 Export Download": []},
+                "export audit schema is missing or migration inferred a historical export")
 
 
 def recovery_point(backup):
@@ -170,6 +165,10 @@ def rehearse_failure(fixture, previous, check_failure):
 
     with TemporaryDirectory(prefix="hp-v1-recovery-", dir=BENCH) as backup:
         files = recovery_point(Path(backup))
+        storage = site_path / "private" / "haxpower_v1"
+        stored = Path(backup) / "haxpower_v1"
+        if storage.exists():
+            shutil.copytree(storage, stored)
         try:
             deploy_app(fault=True)
             failure = site_command("migrate", target=UPGRADE, expect_failure=True)
@@ -187,6 +186,9 @@ def rehearse_failure(fixture, previous, check_failure):
             site_command("restore", str(files["db"]), "--with-public-files", str(files["files"]),
                          "--with-private-files", str(files["private-files"]), "--db-root-password", "@db-root@",
                          target=UPGRADE)
+            if stored.exists():
+                shutil.rmtree(storage)
+                shutil.copytree(stored, storage)
             require(inspect("snapshot", UPGRADE) == previous, "restored database differs from recovery point")
             require(json.loads(config.read_text()) == json.loads(files["conf"].read_text()),
                     "restored site configuration differs from recovery point")
@@ -223,6 +225,8 @@ def integration():
     inspect("stock-count-native", SITE)
     inspect("approval", SITE)
     inspect("stock-correction", SITE)
+    inspect("inventory-reporting", SITE)
+    inspect("inventory-history-scale", SITE)
     clean_with_stock = inspect("snapshot", SITE)
     repeat_migration(SITE, clean_with_stock)
     rehearse_upgrade(clean_with_stock)
@@ -255,13 +259,13 @@ def rehearse_upgrade(clean):
             baseline = Path(path) / "apps/haxpower_v1"
             deploy_app(fixture=baseline)
             version = run(PYTHON, "-c", "import haxpower_v1; print(haxpower_v1.__version__)", capture=True)
-            require(version.strip() == "0.14.0", "expected the merged V1-13 app")
+            require(version.strip() == "0.15.0", "expected the merged V1-14 app")
             site_command("migrate", target=UPGRADE)
             baseline_empty = inspect("snapshot", UPGRADE)
             verify_upgraded(baseline_empty, previous)
             verify_sku_schema(baseline_empty)
             verify_warehouse_schema(baseline_empty)
-            verify_access_schema(baseline_empty, role_count=12)
+            verify_access_schema(baseline_empty)
             verify_batch_schema(baseline_empty)
             verify_stock_schema(baseline_empty)
             inspect("seed-catalog", UPGRADE)
@@ -276,7 +280,7 @@ def rehearse_upgrade(clean):
                     and len(seeded["warehouse"]["native_leaves"]) == 9
                     and len(seeded["access"]["assignments"]) == 2
                     and len(seeded["batch"]["rows"]) == len(seeded["batch"]["native"]) == 5,
-                    "unexpected merged V1-13 synthetic state")
+                    "unexpected merged V1-14 synthetic state")
             inspect("sku-concurrency", UPGRADE)
             inspect("stock-execution", UPGRADE)
             inspect("receipt-execution", UPGRADE)
@@ -286,11 +290,13 @@ def rehearse_upgrade(clean):
             inspect("stock-count", UPGRADE)
             inspect("count-recovery-prepare", UPGRADE)
             inspect("correction-baseline", UPGRADE)
+            inspect("correction-recovery-prepare", UPGRADE)
+            # Ordinary approval recovery requires the final recorded switch to be on.
             inspect("approval-recovery-prepare", UPGRADE)
             baseline_state = inspect("snapshot", UPGRADE)
-            record("merged V1-13 with native movements, counts and approval history", baseline_state)
+            record("merged V1-14 with native movements, counts, approvals and corrections", baseline_state)
             def failed_upgrade(state):
-                verify_correction_upgrade(state, baseline_state, failed=True)
+                verify_reporting_upgrade(state, baseline_state, failed=True)
             rehearse_failure(baseline, baseline_state, failed_upgrade)
         finally:
             deploy_app()
@@ -302,8 +308,12 @@ def run_upgraded_rehearsal(clean, baseline_state):
     check_bench()
     site_command("migrate", target=UPGRADE)
     upgraded = inspect("snapshot", UPGRADE)
-    verify_correction_upgrade(upgraded, baseline_state)
-    record("V1-14 upgraded from merged V1-13; native facts, versions and approvals preserved", upgraded)
+    verify_reporting_upgrade(upgraded, baseline_state)
+    record("V1-15 upgraded from merged V1-14; quantities, versions, approvals and corrections preserved", upgraded)
+    verify_upgraded_workflows(clean)
+
+
+def verify_upgraded_workflows(clean):
     inspect("approval-recovery-finish", UPGRADE)
     inspect("verify-inventory-versions", UPGRADE)
     inspect("verify-skus", UPGRADE)
@@ -325,7 +335,7 @@ def run_upgraded_rehearsal(clean, baseline_state):
     inspect("stock-count-native", UPGRADE)
     # The extended probe rotates the site's generation. Run it after the
     # restored V1-12 Draft has proved continuity with its original snapshot.
-    inspect("correction-recovery-prepare", UPGRADE)
+    inspect("inventory-reporting", UPGRADE)
     populated = inspect("snapshot", UPGRADE)
     record("upgraded site with synthetic domain data and warehouse grants", populated)
     repeat_migration(UPGRADE, populated)
@@ -341,6 +351,7 @@ def run_upgraded_rehearsal(clean, baseline_state):
 
 
 def verify_recovered_stock(clean):
+    inspect("inventory-reporting-recovered", UPGRADE)
     inspect("correction-recovery-finish", UPGRADE)
     inspect("count-recovery-finish", UPGRADE)
     inspect("verify-skus", UPGRADE)

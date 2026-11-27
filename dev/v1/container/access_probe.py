@@ -417,7 +417,9 @@ def verify_http(site):
                 {"id": second.id, "warehouse_id": w1.id, "code": "L2", "display_name": "Visible 2"}
             ], "location projection leaked a hidden mapping or incorrect count")
             product = business(selected_session, "product summary", "get_sku", sku_id=sku.name)
-            require(set(product) == {"id", "code", "display_name"}, "unapproved product fields leaked")
+            require(set(product) == {"id", "code", "display_name", "description", "brand", "specification",
+                                     "stock_uom", "quantity_precision", "identifiers", "aliases", "images", "attachments"},
+                    "employee product projection changed or leaked internal fields")
             require(batch_mapping.native_batch not in str(product), "product API exposed a native Batch identity")
             business(selected_session, "specification summary", "get_specification", specification_id=sku.specification)
             business(all_session, "warehouse role cannot view product", "get_sku", sku_id=sku.name, status=403)

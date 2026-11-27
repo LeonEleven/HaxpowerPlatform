@@ -58,8 +58,8 @@ def replay(row, digest):
     return Result(**json.loads(row.response))
 
 
-def submission(identity):
-    return stock.current(SUBMISSION, identity, SUBMISSION_FIELDS) if identity else None
+def submission(identity, *, locked=True):
+    return stock.current(SUBMISSION, identity, SUBMISSION_FIELDS, locked=locked) if identity else None
 
 
 def event(submission, action, before, result, actor, identity, *, reason="", failure_code=None,

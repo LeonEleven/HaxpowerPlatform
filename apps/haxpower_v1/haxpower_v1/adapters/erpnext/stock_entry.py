@@ -247,7 +247,7 @@ def posting_legs(plan, *, source=False):
                   line.uom, quantity.copy_negate() if source else quantity)
 
 
-def _balances(company, pairs, *, error="RECEIPT_NATIVE_RECONCILIATION_FAILED", posting_at=None, scales=None):
+def _balances(company, pairs, *, error="RECEIPT_NATIVE_RECONCILIATION_FAILED", posting_at=None, scales=None, locked=True):
     buckets, bins = defaultdict(Decimal), {}
     for item, warehouse in sorted(pairs):
         scale = scales[item] if scales else None
@@ -263,8 +263,7 @@ def _balances(company, pairs, *, error="RECEIPT_NATIVE_RECONCILIATION_FAILED", p
             LEFT JOIN `tabSerial and Batch Entry` e ON e.parent = b.name
             WHERE s.company = %s AND s.item_code = %s AND s.warehouse = %s
               AND s.docstatus = 1 AND s.is_cancelled = 0
-            FOR UPDATE
-            """, (company, item, warehouse),
+            """ + (" FOR UPDATE" if locked else ""), (company, item, warehouse),
         )
         ledger, allocated, bundle_ledgers = {}, defaultdict(Decimal), {}
         for (name, qty, batch, part, bundle_status, child_status, voucher, detail, sle_voucher, sle_detail,
@@ -282,14 +281,14 @@ def _balances(company, pairs, *, error="RECEIPT_NATIVE_RECONCILIATION_FAILED", p
                     or (scale is not None and (qty.quantize(scale) != qty or part.quantize(scale) != part))
                     or bundle_ledgers.setdefault(bundle_name, name) != name
                     or (posting_at is not None and (posted_at is None or posted_at > posting_at))):
-                raise StockError(error)
+                raise StockError(error, evidence=dict(sle=name, check="BUNDLE_OR_SLE"))
             ledger[name] = qty
             allocated[name] += part
             buckets[item, warehouse, batch] += part
         if ledger != allocated:
-            raise StockError(error)
+            raise StockError(error, evidence=dict(check="SLE_ALLOCATION", item=item, warehouse=warehouse))
         native_bins = frappe.db.sql(
-            "SELECT CAST(actual_qty AS CHAR) FROM `tabBin` WHERE item_code=%s AND warehouse=%s FOR UPDATE",
+            "SELECT CAST(actual_qty AS CHAR) FROM `tabBin` WHERE item_code=%s AND warehouse=%s" + (" FOR UPDATE" if locked else ""),
             (item, warehouse),
         )
         bins[item, warehouse] = _number(native_bins[0][0]) if native_bins else Decimal(0)
@@ -297,7 +296,9 @@ def _balances(company, pairs, *, error="RECEIPT_NATIVE_RECONCILIATION_FAILED", p
             len(native_bins) > 1 or (scales and ledger and not native_bins)
             or bins[item, warehouse] != sum(ledger.values(), Decimal(0))
         ):
-            raise StockError(error)
+            raise StockError(error, evidence=dict(check="BIN", item=item, warehouse=warehouse,
+                                                  bin=str(bins[item, warehouse]),
+                                                  ledger=str(sum(ledger.values(), Decimal(0)))))
     return buckets, bins
 
 
@@ -330,7 +331,7 @@ def verify_entry(scope):
     return tuple(links)
 
 
-def verify_legs(company, entry_id, row, expected, by_leg, bundles, error):
+def verify_legs(company, entry_id, row, expected, by_leg, bundles, error, *, locked=True):
     for index, effect in enumerate(expected):
         sle = by_leg.get((row.name, effect.warehouse))
         if not sle or (
@@ -341,7 +342,7 @@ def verify_legs(company, entry_id, row, expected, by_leg, bundles, error):
         if (not bundle_id or bundle_id in bundles or (index == 0 and row.serial_and_batch_bundle != bundle_id)):
             raise StockError(error)
         try:
-            bundle = frappe.get_doc(BUNDLE, bundle_id, for_update=True)
+            bundle = frappe.get_doc(BUNDLE, bundle_id, for_update=locked)
         except frappe.DoesNotExistError:
             raise StockError(error) from None
         if (
@@ -378,11 +379,11 @@ def _verify_posting(scope, before, before_batch, deltas, *, allow_gl):
     return tuple(links)
 
 
-def _batch_totals(names):
+def _batch_totals(names, *, locked=True):
     totals = {}
     for name in sorted(names):
         rows = frappe.db.sql(
-            "SELECT CAST(batch_qty AS CHAR) FROM `tabBatch` WHERE name=%s FOR UPDATE", (name,),
+            "SELECT CAST(batch_qty AS CHAR) FROM `tabBatch` WHERE name=%s" + (" FOR UPDATE" if locked else ""), (name,),
         )
         if len(rows) != 1:
             raise StockError("BATCH_MAPPING_UNAVAILABLE")

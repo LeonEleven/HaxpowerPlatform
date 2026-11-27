@@ -19,7 +19,7 @@ _cache_patches = None
 
 
 @contextmanager
-def connection(*, read_committed=False):
+def connection(*, read_committed=False, snapshot=False):
     if _adapter_active.get():
         raise StockError("STOCK_ADAPTER_SIDE_EFFECT")
     previous = frappe.local.db
@@ -33,7 +33,12 @@ def connection(*, read_committed=False):
             # ERPNext uses ordinary reads for availability and valuation. Refresh
             # those reads after waiting on the shared stock-write lock.
             database.sql("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
-        database.sql("START TRANSACTION")
+        if snapshot:
+            database.sql("SET SESSION max_statement_time = 20")
+            database.sql("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+            database.sql("START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY")
+        else:
+            database.sql("START TRANSACTION")
         yield database
     finally:
         try:

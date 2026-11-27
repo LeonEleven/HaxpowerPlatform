@@ -1,14 +1,16 @@
-"""Employee-facing projections. Native names and technical product fields stay private."""
+"""Employee-facing warehouse and product projections."""
 
 import frappe
 
 from ..catalog import validation
 from ..catalog.dto import ACTIVE
-from ..catalog.persistence import SPECIFICATION
-from ..catalog.sku_persistence import SKU
+from ..catalog import read as catalog
+from ..inventory.operations.transaction import connection
+from ..inventory.read.query import Page, PRODUCT_FILTERS, filters
+from ..inventory.read.service import product_data
 from ..warehouse.persistence import LOCATION, WAREHOUSE
 from .policy import (
-    Operation, _record_id, authorized_warehouse_ids, deny, location_mapping_is_visible,
+    Operation, active_actor, authorized_warehouse_ids, deny, location_mapping_is_visible,
     require_location_access, require_operation, require_warehouse_access,
 )
 
@@ -69,19 +71,33 @@ def get_location(location_id: str):
     return dict(_summary(_row(LOCATION, location.name)), warehouse_id=location.warehouse)
 
 
-def _product(doctype, record_id):
-    require_operation(Operation.PRODUCT_READ)
-    row = frappe.db.get_value(doctype, {"name": _record_id(record_id), "status": ACTIVE}, PUBLIC_FIELDS, as_dict=True)
-    if not row:
-        deny()
-    return _summary(row)
-
-
 @frappe.whitelist(methods=["GET"])
 def get_specification(specification_id: str):
-    return _product(SPECIFICATION, specification_id)
+    with connection(snapshot=True):
+        return catalog.get_specification(specification_id)
 
 
 @frappe.whitelist(methods=["GET"])
 def get_sku(sku_id: str):
-    return _product(SKU, sku_id)
+    with connection(snapshot=True):
+        return catalog.get_sku(sku_id)
+
+
+@frappe.whitelist(methods=["GET"])
+def search_products(criteria=None, page: int = None, pageSize: int = None, limit: int = None, offset: int = None):
+    return product_data(filters(criteria, PRODUCT_FILTERS), Page.parse(page, pageSize, limit, offset))[0]
+
+
+@frappe.whitelist(methods=["GET"])
+def product_filters():
+    with connection(snapshot=True):
+        return catalog.filter_options()
+
+
+
+@frappe.whitelist(methods=["GET"])
+def csrf_token():
+    from frappe.sessions import get_csrf_token
+
+    active_actor()
+    return {"csrf_token": get_csrf_token()}

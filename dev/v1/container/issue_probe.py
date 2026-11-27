@@ -135,8 +135,10 @@ def compete(site, company, actor, line, *, repeatable_read=False):
 
     read_source = native.availability.read_source
 
-    def observe_locked(company, pairs, skus, *, posting_at=None):
-        state = read_source(company, pairs, skus, posting_at=posting_at)
+    def observe_locked(company, pairs, skus, *, posting_at=None, **read_options):
+        # The upgrade rehearsal also runs this probe on the merged V1-14 App.
+        require(read_options.get("locked", True), "stock writer attempted a nonlocking availability read")
+        state = read_source(company, pairs, skus, posting_at=posting_at, **read_options)
         if posting_at is not None:
             _, consistent_qty = read_snapshot(frappe.db)
             locked_reads.append((consistent_qty, state[0][0][item, leaf, batch_name]))
@@ -158,7 +160,9 @@ def compete(site, company, actor, line, *, repeatable_read=False):
           patch.object(native.availability, "read_source", observe_locked),
           ThreadPoolExecutor(max_workers=2) as pool):
         results = tuple(pool.map(submit, (first, second)))
-    require(results.count("INSUFFICIENT_STOCK") == 1, "same-bucket independent issues did not prevent overdraw")
+    outcomes = tuple(value if isinstance(value, str) else "Effective" for value in results)
+    require(results.count("INSUFFICIENT_STOCK") == 1,
+            f"same-bucket independent issues did not prevent overdraw: {outcomes}")
     winner, = [result for result in results if not isinstance(result, str)]
     selected = first if winner.document_id == first.draft.document_id else second
     rejected = second if selected is first else first
@@ -377,7 +381,7 @@ def check_precision_and_integrity(company, line):
 
     balances = stock._balances
 
-    def inconsistent_read(company, pairs, *, error, posting_at=None, scales=None):
+    def inconsistent_read(company, pairs, *, error, posting_at=None, scales=None, **read_options):
         db = frappe.db
         sql = db.sql
 
@@ -397,12 +401,12 @@ def check_precision_and_integrity(company, line):
             return rows
 
         with patch.object(db, "sql", corrupt_query):
-            return balances(company, pairs, error=error, posting_at=posting_at, scales=scales)
+            return balances(company, pairs, error=error, posting_at=posting_at, scales=scales, **read_options)
 
     for mismatch in ("Bin", "missing Bundle", "quantity precision"):
         with patch.object(stock, "_balances", inconsistent_read):
             reject("ISSUE_NATIVE_RECONCILIATION_FAILED", lambda: service.submit(payload))
-    with patch.object(stock, "_batch_totals", side_effect=lambda names: dict.fromkeys(names, Decimal("123456"))):
+    with patch.object(stock, "_batch_totals", side_effect=lambda names, **_options: dict.fromkeys(names, Decimal("123456"))):
         reject("ISSUE_NATIVE_RECONCILIATION_FAILED", lambda: service.submit(payload))
     print("Material Issue rejected inconsistent Bundle, Bin, Batch and precision reads without writes.", flush=True)
 

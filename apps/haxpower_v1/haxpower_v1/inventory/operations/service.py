@@ -186,11 +186,11 @@ def _resources(command, action):
     return skus
 
 
-def _lock_document(company, document_id, document_type):
+def _lock_document(company, document_id, document_type, *, locked=True):
     document = store.current(store.DOCUMENT, document_id, (
         "name", "company", "document_type", "revision", "status", "effective_operation", "reason", "notes",
         "owner", "approval_submission",
-    ))
+    ), locked=locked)
     if not document or (document.name, document.company, document.document_type) != (
         document_id, company, document_type,
     ):
@@ -198,7 +198,7 @@ def _lock_document(company, document_id, document_type):
     rows = frappe.db.get_values(store.LINE, {"document_id": document.name}, (
         "name", "line_no", "sku_id", "quantity", "uom", "batch_kind", "batch_id", "source", "target", "reason", "notes",
         "batch_no",
-    ), for_update=True, as_dict=True, order_by="name asc")
+    ), for_update=locked, as_dict=True, order_by="name asc")
     if not rows:
         raise StockError("STOCK_DOCUMENT_INCONSISTENT")
     lines = tuple(Line(

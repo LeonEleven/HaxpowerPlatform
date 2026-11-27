@@ -196,17 +196,17 @@ def _belongs(submission, document):
         policy.deny()
 
 
-def dispatch_revision(document):
+def dispatch_revision(document, *, locked=True):
     if not document.approval_submission:
         return 1  # V1-10 through V1-12 direct dispatch.
-    submission = store.submission(document.approval_submission)
+    submission = store.submission(document.approval_submission, locked=locked)
     _belongs(submission, document)
     event = "Approve" if submission.approval_required else "Approval Exempt"
     status = rules.APPROVED if submission.approval_required else rules.READY
     revisions = frappe.db.get_values(EVENT, {
         "submission_id": submission.name, "company": document.company, "document_id": document.name,
         "action": event, "result": "Succeeded", "resulting_status": status,
-    }, "business_revision", pluck=True, for_update=True)
+    }, "business_revision", pluck=True, for_update=locked)
     if revisions != [submission.business_revision + (2 if submission.approval_required else 1)]:
         raise StockError("APPROVAL_STATE_CONFLICT")
     return revisions[0]

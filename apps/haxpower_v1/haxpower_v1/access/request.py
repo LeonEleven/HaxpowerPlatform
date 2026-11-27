@@ -14,9 +14,15 @@ PUBLIC_COMMANDS = frozenset({
     "frappe.handler.logout", "frappe.handler.ping",
 })
 BUSINESS_COMMANDS = frozenset(
-    f"haxpower_v1.access.api.{name}" for name in (
-        "list_warehouses", "get_warehouse", "list_locations", "get_location", "get_specification", "get_sku",
+    f"haxpower_v1.{module}.{name}"
+    for module, names in (
+        ("access.api", ("list_warehouses", "get_warehouse", "list_locations", "get_location",
+                        "get_specification", "get_sku", "search_products", "product_filters", "csrf_token")),
+        ("inventory.read.api", ("stock", "distribution", "batches", "transit", "ledger", "period",
+                                "documents", "corrections", "document", "history", "audit")),
+        ("reporting.api", ("generate", "status", "download")),
     )
+    for name in names
 )
 LIST_COMMANDS = frozenset({
     "frappe.client.get_list", "frappe.client.get_value", "frappe.client.get_count",
@@ -139,7 +145,10 @@ def _verify_rpc(command, args):
 
     if command in get_server_script_map().get("_api", {}):
         deny()
-    if command in PUBLIC_COMMANDS or command in BUSINESS_COMMANDS:
+    if command in BUSINESS_COMMANDS:
+        frappe.local.hp_private_business_response = True
+        return
+    if command in PUBLIC_COMMANDS:
         return
     if command in LIST_COMMANDS:
         _verify_list(args.get("doctype"), args, get_value=command == "frappe.client.get_value")
@@ -216,3 +225,10 @@ def enforce_http_boundary():
             _verify_write(doctype, data, name=name)
     else:
         deny()
+
+
+def protect_business_cache(response=None, **_kwargs):
+    if response is not None and getattr(frappe.local, "hp_private_business_response", False):
+        response.headers["Cache-Control"] = "private, no-store, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["X-Content-Type-Options"] = "nosniff"

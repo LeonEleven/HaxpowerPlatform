@@ -60,8 +60,8 @@ def insert(doctype, *, name=None, **fields):
     return name
 
 
-def current(doctype, identity, fields):
-    return frappe.db.get_value(doctype, identity, fields, as_dict=True, for_update=True)
+def current(doctype, identity, fields, *, locked=True):
+    return frappe.db.get_value(doctype, identity, fields, as_dict=True, for_update=locked)
 
 
 def update_document(document, result):
