@@ -8,14 +8,21 @@
 
 ## 当前阶段限制
 
-项目已进入正式 V1 工程阶段，当前进行 Stage 3A 工程准备。ERPNext v16 + 独立 HaxpowerPlatform Frappe App 是项目方原则批准的路线。按 [V1 开发 Backlog](docs/V1-DEVELOPMENT-BACKLOG.md) 和当前授权范围实施；Stage 3A 审查完成后从 V1-01 开始。上线须通过 [V1 验收清单](docs/V1-ACCEPTANCE-CHECKLIST.md)。
+V1-01 至 V1-15 已完成工程阶段验收及架构评审。正式路线为 ERPNext v16 + 独立 HaxpowerPlatform Frappe App。下一正式开发任务为 V1-16，须先完成 [业务需求确认](docs/V1-16-REQUIREMENTS.md) 并取得实施授权。按 [V1 开发 Backlog](docs/V1-DEVELOPMENT-BACKLOG.md) 实施。正式员工库存数量 HTTP 写入保持关闭，开放须通过 [V1 验收清单](docs/V1-ACCEPTANCE-CHECKLIST.md) 并取得明确授权。
+
+## 职责与决策
+
+- ChatGPT 负责业务分析、架构评审、开发任务规划及 PR 审查。
+- 项目负责人负责业务决定、实施授权及手动合并。
+- Codex 按任务书执行开发、测试、Commit、Push 和 Draft PR。
+- GitHub 仓库文档是长期项目事实和业务决策的主要来源。经项目负责人批准的决定写入 [项目决策](docs/DECISIONS.md)，候选方案保持待确认。
 
 ## 架构原则
 
 - API-first；网页、小程序、AI 服务通过受控业务 API 访问。
 - V1 优先模块化单体，不提前引入微服务。
 - 领域模型尽量与 ERPNext 内部结构解耦。
-- 使用独立 Frappe App、Hooks 和受支持接口，不修改 Frappe/ERPNext 核心源码。
+- 使用独立 Frappe App、Hooks 和受支持接口，不修改 Frappe/ERPNext 核心源码，不复用旧 Spike 作为正式 App。
 - 公共 API 不暴露 ERPNext 内部 DocType/数据库结构。
 - 前端不得直接访问数据库；外部客户端不得持有管理员密钥。
 
@@ -53,11 +60,11 @@
 
 ## 安全
 
-不提交密码、API Secret、云服务器密钥、Token、生产数据或数据库备份到 Git。阿里云生产环境的访问与修改须事先获得批准，生产操作前备份。上传文件需校验类型、大小和权限。日志不得无必要记录合同全文、密码或 Token。
+不提交密码、API Secret、云服务器密钥、Token、生产数据或数据库备份到 Git。开发、测试和文档任务不访问生产环境，不使用真实业务数据做开发实验。独立授权的阿里云生产操作须事先获批并在操作前备份。上传文件需校验类型、大小和权限。日志不得无必要记录合同全文、密码或 Token。
 
 ## Git 协作规范
 
-- 每个独立开发任务使用专属分支；不在 `main` 分支上直接修改、提交或推送。
+- 每个独立开发任务使用专属分支和独立 Codex 会话。同一任务的补充修复继续使用原任务分支及 PR。不在 `main` 分支上直接修改、提交或推送。
 - 开始修改前检查当前分支、Git 工作区状态和相关 Diff；保留已有修改，不覆盖或撤销不属于当前任务的内容。
 - 每完成一个任务，先运行相关测试或文档检查，再检查 Git Diff（包括暂存区）和待提交文件清单，确认不含密钥、Token、生产数据库、生产数据、敏感配置或不相关修改。
 - 检查通过后，自动将本任务范围内的文件 Commit 到任务分支，使用清晰的英文 Commit Message；不把其他任务的修改一并提交。
