@@ -27,7 +27,7 @@ MAX_SECONDS = 30
 DEFAULT_TTL_HOURS = 24
 CATALOG = "Site Catalog"
 # Bump the applicable value when nested DTO fields or their access rules change.
-PROJECTION_VERSION = dict.fromkeys(workbook.COLUMNS, 1)
+PROJECTION_VERSION = 2
 FIELDS = ("name", "company", "requested_by", "report", "columns_json", "warehouses_json",
           "snapshot_at", "sha256", "file_size", "row_count", "status", "failure_code", "expires_at")
 
@@ -59,18 +59,39 @@ def _hours():
     return hours
 
 
-def _coverage(report, company=None):
+def _coverage(report, company=None, *, product_required=False):
     policy.require_operation(policy.Operation.EXPORT)
-    if report == "products":
+    if report == "products" or product_required:
         policy.require_operation(policy.Operation.PRODUCT_READ)
+    if report == "products":
         return CATALOG, ()
     scope = Scope.current(company)
     return scope.company, tuple(scope.warehouses)
 
 
-def _projection(report):
-    if report in workbook.COLUMNS:
-        return {"columns": list(workbook.COLUMNS[report]), "version": PROJECTION_VERSION[report]}
+def _projection(report, *, includes_specification=False, uses_product_search=False):
+    columns = list(workbook.COLUMNS[report])
+    product_columns = []
+    if report == "products":
+        product_columns = list(columns)
+    elif report == "stock":
+        if includes_specification:
+            product_columns = ["specification"]
+        else:
+            columns.remove("specification")
+    return {
+        "version": PROJECTION_VERSION,
+        "columns": columns,
+        "product_columns": product_columns,
+        "uses_product_search": uses_product_search,
+    }
+
+
+def _authorize_projection(report, company, warehouses, projection):
+    product_required = bool(projection["product_columns"] or projection["uses_product_search"])
+    actual_company, current = _coverage(report, company, product_required=product_required)
+    if actual_company != company or not set(warehouses) <= set(current):
+        policy.deny()
 
 
 def _current(identity):
@@ -78,12 +99,23 @@ def _current(identity):
     row = frappe.db.get_value(EXPORT, identity, FIELDS, as_dict=True)
     if not row or row.name != identity or row.requested_by != policy.active_actor():
         policy.deny()
-    projection = _projection(row.report)
-    if not projection or projection != json.loads(row.columns_json):
+    try:
+        projection = json.loads(row.columns_json)
+        warehouses = json.loads(row.warehouses_json)
+    except (TypeError, ValueError):
         policy.deny()
-    company, current = _coverage(row.report, row.company)
-    if company != row.company or not set(json.loads(row.warehouses_json)) <= set(current):
+    # An older manifest proves neither the field classes nor the search policy.
+    if (row.report not in workbook.COLUMNS or not isinstance(projection, dict)
+            or type(projection.get("uses_product_search")) is not bool
+            or not isinstance(warehouses, list) or any(not isinstance(warehouse, str) for warehouse in warehouses)):
         policy.deny()
+    expected = _projection(
+        row.report, includes_specification=projection.get("product_columns") == ["specification"],
+        uses_product_search=projection["uses_product_search"],
+    )
+    if projection != expected:
+        policy.deny()
+    _authorize_projection(row.report, row.company, warehouses, projection)
     return row
 
 
@@ -107,31 +139,39 @@ def generate(report, submitted):
         actor = policy.active_actor()
         company, _ = _coverage(report, criteria.get("company"))
         identity = uuid4().hex
+        projection = _projection(report)
+        warehouses = ()
         row = dict(company=company, requested_by=actor, report=report,
                    criteria=json.dumps(criteria, ensure_ascii=False, sort_keys=True),
-                   columns_json=json.dumps(_projection(report)), warehouses_json="[]",
+                   columns_json=json.dumps(projection), warehouses_json="[]",
                    snapshot_at=started, expires_at=started + timedelta(hours=_hours()),
                    status="Failed", row_count=0, file_size=0, sha256=None, failure_code=None)
         try:
             if report == "products":
                 response, _ = product_data(criteria, Page(MAX_ROWS + 1, 0), export=True)
             else:
-                response, actual_company, coverage = inventory_data(report, criteria, Page(MAX_ROWS + 1, 0), export=True)
-                row["warehouses_json"] = json.dumps(coverage)
-                current_company, current = _coverage(report, company)
-                if actual_company != current_company or not set(coverage) <= set(current):
+                response, coverage = inventory_data(report, criteria, Page(MAX_ROWS + 1, 0), export=True)
+                if coverage.company != company:
                     policy.deny()
+                warehouses = coverage.warehouses
+                projection = _projection(
+                    report, includes_specification=coverage.includes_specification,
+                    uses_product_search=coverage.uses_product_search,
+                )
+                row["warehouses_json"] = json.dumps(warehouses)
+                row["columns_json"] = json.dumps(projection)
+            _authorize_projection(report, company, warehouses, projection)
             if response["total"] > MAX_ROWS:
                 raise StockError("EXPORT_ROW_LIMIT")
             rows = response["rows"]
             row["snapshot_at"] = response["as_of"]
             row["file_size"], row["sha256"] = private_files.store(
-                identity, lambda stream: workbook.write(stream, report, rows, deadline=deadline),
+                identity, lambda stream: workbook.write(
+                    stream, report, rows, deadline=deadline, columns=projection["columns"],
+                ),
             )
             try:
-                _, current = _coverage(report, company)
-                if not set(json.loads(row["warehouses_json"])) <= set(current):
-                    policy.deny()
+                _authorize_projection(report, company, warehouses, projection)
             except frappe.PermissionError:
                 private_files.filename(identity).unlink(missing_ok=True)
                 raise

@@ -1,6 +1,7 @@
 """Employee inventory summaries and reports using a single authorization plan."""
 
 from collections import defaultdict
+from dataclasses import dataclass
 from decimal import Decimal, localcontext
 from functools import cached_property
 
@@ -19,10 +20,19 @@ from .query import Query, Scope
 REPORTS = frozenset({"stock", "distribution", "batches", "transit", "ledger", "period", "documents", "corrections"})
 
 
+@dataclass(frozen=True)
+class InventoryCoverage:
+    company: str
+    warehouses: tuple[str, ...]
+    includes_specification: bool
+    uses_product_search: bool
+
+
 class Inventory:
     def __init__(self, options):
         self.scope = Scope.current(options.get("company"))
-        self.query = Query(options, self.scope)
+        product_read = policy.Operation.PRODUCT_READ in policy.granted_operations()
+        self.query = Query(options, self.scope, product_read=product_read)
         self.included_warehouses = set()
 
     @cached_property
@@ -63,17 +73,19 @@ class Inventory:
         if self.query.include_zero:
             candidates = physical.keys() | transit.keys() if self.query.batch_selected else None
         ids = self.query.product_ids(candidates=candidates)
-        products = catalog.by_ids(ids)
+        products = catalog.by_ids(ids, include_specification=self.query.product_read)
         result = []
         for sku in ids:
             item = products[sku]
-            spec = item["specification"]
-            result.append(dict(
+            row = dict(
                 id=item["id"], code=item["code"], display_name=item["display_name"],
-                specification={key: spec[key] for key in ("id", "code", "display_name", "category_path", "attributes")},
                 brand=item["brand"], stock_uom=item["stock_uom"], physical=quantity(physical[sku]),
                 in_transit=quantity(transit[sku]),
-            ))
+            )
+            if self.query.product_read:
+                spec = item["specification"]
+                row["specification"] = {key: spec[key] for key in ("id", "code", "display_name", "category_path", "attributes")}
+            result.append(row)
         valid = set(ids)
         self.included_warehouses.update(self.scope.locations[b.location_id]["warehouse_id"]
                                         for b, _ in self._physical() if b.sku_id in valid)
@@ -224,11 +236,15 @@ def inventory_data(report, options, page, *, export=False):
             policy.require_operation(policy.Operation.EXPORT)
         service = Inventory(options)
         result = getattr(service, report)()
-        scope = tuple(sorted(service.included_warehouses))
+        coverage = InventoryCoverage(
+            service.scope.company, tuple(sorted(service.included_warehouses)),
+            includes_specification=report == "stock" and service.query.product_read,
+            uses_product_search=service.query.uses_product_fields,
+        )
         response = dict(page.select(result), as_of=as_of)
         if report in ("ledger", "period"):
             response["timezone"] = get_system_timezone()
-        return response, service.scope.company, scope
+        return response, coverage
 
 
 def product_data(options, page, *, export=False):

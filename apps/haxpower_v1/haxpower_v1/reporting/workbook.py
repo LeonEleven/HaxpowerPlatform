@@ -47,14 +47,14 @@ def text(value):
     return value
 
 
-def write(stream, report, rows, *, deadline):
+def write(stream, report, rows, *, deadline, columns=None):
     # Delay loading the writer for APIs that only return JSON.
     from openpyxl import Workbook
     from openpyxl.cell import WriteOnlyCell
 
     book = Workbook(write_only=True)
     sheet = book.create_sheet(title=report)
-    columns = COLUMNS[report]
+    columns = COLUMNS[report] if columns is None else columns
 
     total_bytes = 0
 

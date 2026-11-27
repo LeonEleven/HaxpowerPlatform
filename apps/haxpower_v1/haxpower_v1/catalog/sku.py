@@ -204,7 +204,7 @@ def search_skus(query: str, *, limit: int = 20, offset: int = 0, include_inactiv
 
 
 def search_sku_ids(query, *, limit=None, offset=0, include_inactive=False, category=None, brand=None,
-                   sku_code=None, attributes=None, candidates=None):
+                   sku_code=None, attributes=None, candidates=None, stock_fields_only=False):
     """Search one SKU at a time, with specification fields shared by its own SKUs."""
     from . import read
 
@@ -214,13 +214,16 @@ def search_sku_ids(query, *, limit=None, offset=0, include_inactive=False, categ
     tokens = normalized.split()
     if len(normalized) > 200 or len(tokens) > 10:
         frappe.throw("PRODUCT_SEARCH_LIMIT_EXCEEDED")
+    if stock_fields_only and (category is not None or attributes is not None):
+        frappe.throw("Product read permission is required for technical filters.", frappe.PermissionError)
     if category is not None:
         check.identifier(category, "Category")
     if brand is not None:
         check.identifier(brand, "Brand")
     if sku_code is not None:
         sku_code = check.key(sku_code, "SKU code")
-    attributes = read.attribute_filters(attributes if attributes is not None else {})
+    if not stock_fields_only:
+        attributes = read.attribute_filters(attributes if attributes is not None else {})
     conditions, params = [], []
 
     def condition(sql, value):
@@ -237,6 +240,24 @@ def search_sku_ids(query, *, limit=None, offset=0, include_inactive=False, categ
         if not candidates:
             return (), 0
         condition("sku.name IN %s", tuple(sorted(candidates)))
+
+    if stock_fields_only:
+        # The full search index also contains descriptions. Normalize only the
+        # individually permitted fields, before computing matches and totals.
+        where = " AND ".join(conditions) or "1 = 1"
+        rows = frappe.db.sql(
+            f"""SELECT sku.name, sku.code, sku.display_name, sku.stock_uom, brand.code, brand.display_name
+                FROM `tab{SKU}` sku LEFT JOIN `tab{BRAND}` brand ON brand.name = sku.brand
+                WHERE {where} ORDER BY (BINARY LOWER(sku.code) = BINARY %s) DESC, sku.code, sku.name""",
+            (*params, normalized),
+        )
+        if tokens:
+            searchable = ((name, _search_text("\n".join(value or "" for value in fields))) for name, *fields in rows)
+            names = tuple(name for name, label in searchable if all(token in label for token in tokens))
+        else:
+            names = tuple(row[0] for row in rows)
+        end = offset + limit if limit is not None else None
+        return names[offset:end], len(names)
 
     spec_search = {}
     if tokens or category or attributes:
@@ -266,12 +287,15 @@ def search_sku_ids(query, *, limit=None, offset=0, include_inactive=False, categ
     where = " AND ".join(conditions) or "1 = 1"
     source = f"""FROM `tab{SKU}` sku LEFT JOIN `tab{BRAND}` brand ON brand.name = sku.brand
                  WHERE {where}"""
-    sort = """ORDER BY (BINARY LOWER(sku.code) = BINARY %s) DESC,
+    sort, sort_params = "ORDER BY sku.code, sku.name", ()
+    if normalized:
+        sort = """ORDER BY (BINARY LOWER(sku.code) = BINARY %s) DESC,
         EXISTS (SELECT 1 FROM `tabHP V1 Product Identifier` exact_id
                 WHERE exact_id.parent=sku.name AND exact_id.parenttype=%s AND exact_id.parentfield='identifiers'
                 AND BINARY exact_id.search_text=BINARY %s) DESC, sku.code, sku.name"""
+        sort_params = (normalized, SKU, normalized)
     page = " LIMIT %s OFFSET %s" if limit is not None else ""
     names = frappe.db.sql(f"SELECT sku.name {source} {sort}{page}",
-                          (*params, normalized, SKU, normalized, *((limit, offset) if page else ())))
+                          (*params, *sort_params, *((limit, offset) if page else ())))
     total = frappe.db.sql(f"SELECT COUNT(*) {source}", params)[0][0] if page else len(names)
     return tuple(name for (name,) in names), total

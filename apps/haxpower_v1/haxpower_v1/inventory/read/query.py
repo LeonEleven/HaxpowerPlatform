@@ -103,8 +103,11 @@ class Scope:
 
 
 class Query:
-    def __init__(self, options, scope):
+    def __init__(self, options, scope, *, product_read):
         self.scope = scope
+        self.product_read = product_read
+        if not product_read and {"category", "attributes"} & options.keys():
+            policy.deny()
         self.warehouse = options.get("warehouse_id")
         self.location = options.get("location_id")
         if self.warehouse is not None and policy._record_id(self.warehouse) not in scope.warehouses:
@@ -151,6 +154,10 @@ class Query:
     def batch_matches(self, batch):
         return not self.batch_selected or batch == self.batch
 
+    @property
+    def uses_product_fields(self):
+        return self.product_read and any(self.product.get(key) for key in ("query", "category", "attributes"))
+
     def product_ids(self, *, candidates=None, active=True):
         from ...catalog.sku import search_sku_ids
 
@@ -158,5 +165,6 @@ class Query:
             candidates = {self.sku} if candidates is None else {self.sku} & candidates
         return search_sku_ids(
             self.product.get("query", ""), candidates=candidates, include_inactive=not active,
+            stock_fields_only=not self.product_read,
             **{key: val for key, val in self.product.items() if key != "query"},
         )[0]

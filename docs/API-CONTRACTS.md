@@ -236,11 +236,15 @@ complete 携带任务投影（含期望 revision、原快照身份和稳定行�
 | 模块 | 方法 | 筛选及权限 |
 | --- | --- | --- |
 | access.api | search_products、product_filters、get_sku、get_specification | PRODUCT_READ。列表可传 `query`、`category`、`brand`、`sku_code`、`attributes`（属性 ID 到精确标量或选项 ID）。详情使用 `sku_id` 或 `specification_id`。 |
-| inventory.read.api | stock、distribution、batches、transit | INVENTORY_READ 和授权公司/仓库。在产品筛选之上可传 `company`、`sku_id`、`warehouse_id`、`location_id`、`batch`、`include_zero`。 |
+| inventory.read.api | stock、distribution、batches、transit | INVENTORY_READ 和授权公司/仓库。可传库存适用的目录筛选及 `company`、`sku_id`、`warehouse_id`、`location_id`、`batch`、`include_zero`。 |
 | inventory.read.api | ledger、period、documents、corrections | 同库存权限。流水可增加 `start`、`end`、`action`、`document_number`、`direction`（INCREASE/DECREASE）。期间必需起止日期。单据筛选用建立日期及单据类型。 |
 | inventory.read.api | document、history、audit | `document_id` 和可选 `company`。详情完整仓库范围，audit 同时要求普通或专项审批。 |
 | reporting.api | generate、status、download | 同相应报告权限并要求 EXPORT。generate POST，JSON `report` 和 `criteria`；status GET 及 download POST 使用 `export_id`。download 返回附件。 |
 | access.api | csrf_token | 已认证用户取得当前会话的 CSRF 值，POST 放入 `X-Frappe-CSRF-Token`。 |
+
+只有 INVENTORY_READ 时，库存接口的 `query` 按 SKU 编码、名称、品牌编码及名称和库存单位做 AND 匹配，排序只使用可读字段。库存摘要省略 `specification`。传入 `category` 或 `attributes` 返回 403。兼有 PRODUCT_READ 时可使用完整产品关键词和精确筛选，库存摘要提供规格及技术属性。目录读取保持独立。
+
+Excel 列与相应查询的授权字段一致。状态及下载依文件生成时记录的列、技术字段类别和筛选依赖重验权限。即使工作簿只有库存列，使用完整产品查询生成的结果也要求仍持有 PRODUCT_READ。旧文件缺少字段分类记录时，状态和下载统一返回 403，申请人应重新生成。
 
 省略 `batch` 时遍历现有桶。显式 JSON null 是无批次。字符串按业务批次身份精确匹配。响应同时可提供领域 `batch_id`。数量使用十进制字符串。日期为站点业务时区下的 inclusive YYYY-MM-DD，实际比较采用开始当天零时至结束次日零时的半开区间。流水用原生 `posting_datetime`，以操作、行及桶标识打破同时间顺序。期间行包含期初、增加、减少、期末和动作分类。物理和双侧授权在途各有独立的桶类型。在途详情使用领域移库行，发出、实收、退回和剩余可核对。
 

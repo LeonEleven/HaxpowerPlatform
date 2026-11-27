@@ -100,23 +100,30 @@ def searchable_text(spec):
     return _search_text("\n".join(fields))
 
 
-def by_ids(ids, *, details=False):
+def by_ids(ids, *, details=False, include_specification=False):
     if not ids:
         return {}
-    skus = rows(SKU, "name code display_name description specification brand stock_uom quantity_precision",
-                {"name": ("in", tuple(ids))})
-    specs = specification_rows({"name": ("in", tuple({row.specification for row in skus}))})
-    brands = labels(BRAND)
+    include_specification = include_specification or details
+    fields = "name code display_name brand stock_uom quantity_precision"
+    if include_specification:
+        fields += " specification"
+    if details:
+        fields += " description"
+    skus = rows(SKU, fields, {"name": ("in", tuple(ids))})
+    specs = specification_rows({"name": ("in", tuple({row.specification for row in skus}))}) if include_specification else {}
+    brands = {row.name: label(row) for row in rows(BRAND, "name code display_name")}
     identifiers = children("HP V1 Product Identifier", SKU, "identifiers", "kind value source notes", ids) if details else {}
     aliases = children("HP V1 Product Alias", SKU, "aliases", "value language source searchable", ids) if details else {}
     result = {}
     for row in skus:
         result[row.name] = dict(
-            label(row), description=row.description or "", specification=public_spec(specs[row.specification]),
-            brand=label(brands[row.brand]), stock_uom=row.stock_uom, quantity_precision=row.quantity_precision,
+            label(row), brand=brands[row.brand], stock_uom=row.stock_uom, quantity_precision=row.quantity_precision,
         )
+        if include_specification:
+            result[row.name]["specification"] = public_spec(specs[row.specification])
         if details:
             result[row.name].update(
+                description=row.description or "",
                 identifiers=[{k: v for k, v in item.items() if k != "parent"} for item in identifiers[row.name]],
                 aliases=[{k: v for k, v in item.items() if k not in ("parent", "searchable")} for item in aliases[row.name]],
                 images=[], attachments=[],

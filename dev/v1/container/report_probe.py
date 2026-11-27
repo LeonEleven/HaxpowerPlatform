@@ -107,6 +107,7 @@ def run(site):
     only_export = synthetic_user(prefix, "read-export-only", Operation.EXPORT)
     other = synthetic_user(prefix, "read-other", Operation.INVENTORY_READ, Operation.EXPORT)
     set_scope(selected[0], fixture.company, Mode.SELECTED, [first])
+    set_scope(product[0], fixture.company, Mode.SELECTED, [first])
     set_scope(all_user[0], fixture.company, Mode.ALL)
     set_scope(other[0], fixture.company, Mode.SELECTED, [first])
     frappe.db.commit()
@@ -126,6 +127,7 @@ def run(site):
                           params={"criteria": json.dumps({"query": "ｓｙｎｔｈｅｔｉｃ　合成"}), "page": 1, "pageSize": 1})
         require(products["total"] >= 2 and len(products["rows"]) == 1, "normalized AND/pagination failed")
         require("physical" not in products["rows"][0], "directory revealed stock")
+        verify_product_permissions(fixture, request, client, authorized, product_reader)
         criteria = {"sku_id": fixture.sku, "location_id": fixture.source}
         response = result(request, authorized, "inventory.read.api.stock", params={"criteria": json.dumps(criteria)})
         row, = response["rows"]
@@ -226,6 +228,151 @@ def run(site):
     measure_catalog()
     print(f"V1-15 HTTP roles, warehouse scope, native snapshots, XLSX and revocation passed in "
           f"{monotonic() - started:.2f}s.", flush=True)
+
+
+def verify_product_permissions(fixture, request, client, stock_reader, product_reader):
+    """Exercise catalog fields, result selection and workbook revocation on the same cookies."""
+    from unittest.mock import patch
+
+    from haxpower_v1.adapters.erpnext import item
+    from haxpower_v1.catalog import service, sku
+    from haxpower_v1.catalog.dto import TEXT, AttributeData, CategoryData, SpecificationData, TemplateData
+    from haxpower_v1.catalog.sku_dto import Alias, Identifier, SKUData
+    from haxpower_v1.catalog.sku_persistence import SKU
+
+    prefix = uuid4().hex[:10].upper()
+    code = f"SYNTHETIC-FIELD-{prefix}"
+    term = f"ATTR-{prefix}"
+    category = service.save_category(CategoryData(code=code, display_name=f"CATEGORY-{prefix}"))
+    attribute = service.save_attribute(AttributeData(code=code, display_name="Synthetic field", data_type=TEXT))
+    service.save_template(TemplateData(category=category.id, attribute=attribute.id, searchable=True))
+    spec = service.create_specification(
+        SpecificationData(code=code, category=category.id, display_name=f"SPEC-{prefix}"),
+        attributes={attribute.id: [term]},
+    )
+    base = frappe.db.get_value(SKU, fixture.sku, ("brand", "native_item_group", "stock_uom", "quantity_precision"),
+                               as_dict=True)
+    with patch.dict(frappe.conf, {item.SETTINGS: {
+        "item_group": base.native_item_group, "uom_precision": {base.stock_uom: base.quantity_precision},
+    }}):
+        product = sku.create_sku(
+            SKUData(code=code, specification=spec.id, brand=base.brand, display_name="合成可读",
+                    description=f"DESCRIPTION-{prefix}", stock_uom=base.stock_uom,
+                    quantity_precision=base.quantity_precision),
+            identifiers=[Identifier(kind="OEM", value=f"IDENTIFIER-{prefix}")],
+            aliases=[Alias(value=f"ALIAS-{prefix}")],
+        )
+    dual_identity = synthetic_user(prefix, "read-combined", Operation.INVENTORY_READ,
+                                   Operation.PRODUCT_READ, Operation.EXPORT)
+    set_scope(dual_identity[0], fixture.company, Mode.SELECTED, [fixture.warehouses[0]])
+    frappe.db.commit()
+    with fixture.operate():
+        receipt = receipts.submit(fixture.receipt_command("2", sku=product.id))
+
+    dual = client(dual_identity)
+    criteria = {"sku_id": product.id, "location_id": fixture.source}
+    date = frappe.utils.nowdate()
+
+    def report(session, name, selection, expected=200):
+        response = request(session, f"inventory.read.api.{name}", params={"criteria": json.dumps(selection)},
+                           expected=expected)
+        return response.json().get("message")
+
+    def generate(session, name, selection):
+        issued = result(request, session, "reporting.api.generate", body={"report": name, "criteria": selection})
+        require(issued["status"] == "Ready" and issued["rows"] >= 1, "field coverage export did not generate")
+        return issued["export_id"]
+
+    def download(session, identity, expected=200):
+        return request(session, "reporting.api.download", body={"export_id": identity}, expected=expected)
+
+    directory = result(request, product_reader, "access.api.get_sku", params={"sku_id": product.id})
+    require(term in json.dumps(directory) and not ({"physical", "available", "in_transit"} & directory.keys()),
+            "product-only detail lost technical fields or exposed inventory")
+    report(product_reader, "stock", criteria, expected=403)
+    request(stock_reader, "access.api.product_filters", expected=403)
+    detail = result(request, stock_reader, "inventory.read.api.document", params={"document_id": receipt.document_id})
+    require(term not in json.dumps(detail) and "specification" not in json.dumps(detail),
+            "stock document leaked product fields")
+
+    basic = report(stock_reader, "stock", {**criteria, "query": "合成可读"})
+    basic_row, = basic["rows"]
+    require(basic["total"] == 1 and Decimal(basic_row["physical"]) == 2 and "specification" not in basic_row,
+            "basic keyword search lost quantity or returned technical fields")
+    for secret in (term, f"SPEC-{prefix}", f"CATEGORY-{prefix}", f"DESCRIPTION-{prefix}",
+                   f"IDENTIFIER-{prefix}", f"ALIAS-{prefix}"):
+        require(report(stock_reader, "stock", {**criteria, "query": secret})["total"] == 0,
+                "stock-only keyword matched a restricted catalog field")
+
+    exact = {**criteria, "attributes": {attribute.id: term}}
+    for name in ("stock", "distribution", "batches", "transit", "ledger", "period", "documents", "corrections"):
+        selection = {**criteria, "start": date, "end": date} if name == "period" else criteria
+        report(stock_reader, name, {**selection, "attributes": exact["attributes"]}, expected=403)
+        require(report(stock_reader, name, {**selection, "query": term})["total"] == 0,
+                f"{name} used restricted keyword matches for an inventory-only employee")
+    report(stock_reader, "stock", {**criteria, "category": category.id}, expected=403)
+    request(stock_reader, "reporting.api.generate", body={"report": "stock", "criteria": exact}, expected=403)
+
+    combined = {**exact, "query": f"合成可读　{term.lower()}"}
+    full = report(dual, "stock", combined)
+    full_row, = full["rows"]
+    require(full["total"] == 1 and term in json.dumps(full_row["specification"]),
+            "combined permission search lost its AND semantics or technical projection")
+    report_id = generate(dual, "stock", combined)
+    basic_id = generate(stock_reader, "stock", criteria)
+    plain_id = generate(dual, "distribution", criteria)
+    filtered_id = generate(dual, "distribution", combined)
+
+    full_sheet = xlsx_values(download(dual, report_id))
+    basic_sheet = xlsx_values(download(stock_reader, basic_id))
+    filtered_sheet = xlsx_values(download(dual, filtered_id))
+    require("specification" not in filtered_sheet[0], "distribution unexpectedly exported technical columns")
+    frappe.db.rollback()
+    require("specification" in full_sheet[0] and term in str(full_sheet[1])
+            and "specification" not in basic_sheet[0] and term not in str(basic_sheet[1]),
+            "Excel field visibility differs from the corresponding employee page")
+    manifest = json.loads(frappe.db.get_value(exports.EXPORT, report_id, "columns_json"))
+    coverage = json.loads(frappe.db.get_value(exports.EXPORT, filtered_id, "columns_json"))
+    require(manifest["columns"] == list(full_sheet[0]) and manifest["product_columns"] == ["specification"]
+            and coverage["product_columns"] == [] and coverage["uses_product_search"],
+            "export did not record actual columns and technical search dependency")
+
+    # An owner with both read roles still must regenerate an unclassified workbook.
+    original = frappe.db.get_value(exports.EXPORT, report_id, "columns_json")
+    try:
+        frappe.db.set_value(exports.EXPORT, report_id, "columns_json",
+                            json.dumps({"columns": list(full_sheet[0]), "version": 1}), update_modified=False)
+        frappe.db.commit()
+        request(dual, "reporting.api.status", params={"export_id": report_id}, expected=403)
+        download(dual, report_id, expected=403)
+    finally:
+        frappe.db.set_value(exports.EXPORT, report_id, "columns_json", original, update_modified=False)
+        frappe.db.commit()
+
+    roles = {"parent": dual_identity[0], "role": Operation.PRODUCT_READ.role}
+    require(frappe.db.exists("Has Role", roles), "missing product role before revocation")
+    frappe.db.delete("Has Role", roles)
+    frappe.db.commit()
+    for identity in (report_id, filtered_id):
+        request(dual, "reporting.api.status", params={"export_id": identity}, expected=403)
+        download(dual, identity, expected=403)
+    result(request, dual, "reporting.api.status", params={"export_id": plain_id})
+    download(dual, plain_id)
+    require("specification" not in report(dual, "stock", criteria)["rows"][0],
+            "the same cookie retained technical fields after revocation")
+
+    checksum = frappe.db.get_value(exports.EXPORT, plain_id, "sha256")
+    try:
+        frappe.db.set_value(exports.EXPORT, plain_id, "sha256", "0" * 64, update_modified=False)
+        frappe.db.commit()
+        rejected = download(dual, plain_id, expected=417)
+        require("PRIVATE_FILE_UNAVAILABLE" in rejected.text, "download failed without its integrity error")
+    finally:
+        frappe.db.set_value(exports.EXPORT, plain_id, "sha256", checksum, update_modified=False)
+        frappe.db.commit()
+
+    print("V1-15 Cookie HTTP field isolation, AND search, workbook provenance, revocation and integrity passed.",
+          flush=True)
 
 
 def verify_snapshot(site, fixture, reader):
@@ -433,14 +580,18 @@ def check_workbook():
 def verify_recovered(site):
     from haxpower_v1.access.policy import granted_operations
 
-    records = frappe.get_all(exports.EXPORT, filters={"report": "distribution", "status": "Ready"},
-                             fields=["name", "company", "requested_by", "file_size", "sha256"])
+    records = frappe.get_all(exports.EXPORT, filters={"report": ("in", ["distribution", "stock"]), "status": "Ready"},
+                             fields=["name", "company", "requested_by", "file_size", "sha256", "columns_json"])
     retained, revoked = [], []
     for row in records:
         data = exports.private_files.read(row.name, row.file_size, row.sha256)
         require(data.startswith(b"PK"), "recovery lost the validated Excel contents")
+        manifest = json.loads(row.columns_json)
+        required = {Operation.EXPORT, Operation.INVENTORY_READ}
+        if manifest["product_columns"] or manifest["uses_product_search"]:
+            required.add(Operation.PRODUCT_READ)
         with actor_session(row.requested_by, row.company):
-            if Operation.EXPORT in granted_operations():
+            if required <= granted_operations():
                 _, recovered = exports.download(row.name)
                 require(recovered == data, "restored authorized workbook differs")
                 retained.append(row)
