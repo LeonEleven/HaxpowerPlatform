@@ -249,7 +249,7 @@ def verify_product_permissions(fixture, request, client, stock_reader, product_r
     base = frappe.db.get_value(SKU, fixture.sku, ("brand", "native_item_group", "stock_uom", "quantity_precision"),
                                as_dict=True)
     formal = hasattr(service, "create_fixture_specification")
-    legacy_spec, legacy_sku = f"OLDSPEC-{prefix}", f"OLDSKU-{prefix}"
+    legacy_spec, legacy_sku = f"OLDSPEC-<{prefix}>", f"OLDSKU-{prefix}"
     with patch.dict(frappe.conf, {item.SETTINGS: {
         "item_group": base.native_item_group, "uom_precision": {base.stock_uom: base.quantity_precision},
     }}):

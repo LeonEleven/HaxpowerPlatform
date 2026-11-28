@@ -11,7 +11,7 @@ from uuid import uuid4
 import frappe
 from frappe.utils import get_datetime, now_datetime
 
-from . import numbers, validation as check
+from . import history, numbers, validation as check
 from .dto import (
     ACTIVE, BOOLEAN, DATA_TYPES, DATE, DECIMAL, MULTI, MULTI_SELECT, SELECT_TYPES, SINGLE, TEXT,
     AttributeData, AttributeValues, AuditEntry, CatalogRecord, CategoryData, InputValue, OptionData,
@@ -240,7 +240,8 @@ def _saved_values(record):
 def _specification(record):
     return Specification(
         record.name, record.revision, _data(SpecificationData, record), tuple(_saved_values(record).values()),
-        tuple(HistoricalIdentifier(source=row.source, value=row.value) for row in record.historical_identifiers),
+        tuple(HistoricalIdentifier(source=row.source, value=history.decode(row.value))
+              for row in record.historical_identifiers),
     )
 
 
@@ -338,7 +339,7 @@ def _append_history(record, identifiers):
 
     if not isinstance(identifiers, Sequence) or len(identifiers) > 100:
         frappe.throw("Provide up to 100 typed specification historical identifiers.")
-    existing = {(row.source, row.value) for row in record.historical_identifiers}
+    existing = {(row.source, history.decode(row.value)) for row in record.historical_identifiers}
     for row in identifiers:
         if not isinstance(row, HistoricalIdentifier):
             frappe.throw("Expected a typed historical identifier.")
@@ -349,7 +350,8 @@ def _append_history(record, identifiers):
             if len(existing) >= 100:
                 frappe.throw("A specification supports up to 100 historical identifiers.")
             record.append("historical_identifiers", dict(
-                source=source, value=row.value, search_text=check.text(_search_text(row.value), "Search text", 140),
+                source=source, value=history.encode(row.value),
+                search_text=history.encode(check.text(_search_text(row.value), "Search text", 140)),
             ))
             existing.add(key)
 

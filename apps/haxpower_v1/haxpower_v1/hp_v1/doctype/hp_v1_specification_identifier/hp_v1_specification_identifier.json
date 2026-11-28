@@ -19,16 +19,14 @@
   {
    "fieldname": "value",
    "label": "Historical Code",
-   "fieldtype": "Data",
-   "reqd": 1,
-   "length": 140
+   "fieldtype": "Small Text",
+   "reqd": 1
   },
   {
    "fieldname": "search_text",
    "label": "Search Text",
-   "fieldtype": "Data",
+   "fieldtype": "Small Text",
    "reqd": 1,
-   "length": 140,
    "hidden": 1
   }
  ],

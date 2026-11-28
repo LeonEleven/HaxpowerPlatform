@@ -7,7 +7,7 @@ from decimal import Decimal
 import frappe
 
 from ..access import policy
-from . import service, validation
+from . import history, service, validation
 from .dto import ACTIVE, BOOLEAN, DATE, DECIMAL, SELECT_TYPES, TEXT
 from .persistence import ATTRIBUTE, CATEGORY, OPTION, SPEC_IDENTIFIER, SPECIFICATION, TEMPLATE, VALUE
 from .sku_persistence import BRAND, SKU
@@ -50,7 +50,7 @@ def specification_rows(filters):
     values = children(VALUE, SPECIFICATION, "attribute_values",
                       "attribute data_type option_id option_key value_text value_decimal value_boolean value_date",
                       [spec.name for spec in specs])
-    history = children(SPEC_IDENTIFIER, SPECIFICATION, "historical_identifiers", "source value search_text",
+    historical_ids = children(SPEC_IDENTIFIER, SPECIFICATION, "historical_identifiers", "source value search_text",
                        [spec.name for spec in specs])
     result = {}
     for spec in specs:
@@ -83,9 +83,10 @@ def specification_rows(filters):
             attribute["values"].append(value)
         result[spec.name] = dict(label(spec), description=spec.description or "",
                                  category_path=list(reversed(path.values())), attributes=list(attributes.values()),
-                                 historical_identifiers=[dict(source=row.source, value=row.value)
-                                                         for row in history[spec.name]],
-                                 historical_search=[row.search_text for row in history[spec.name]])
+                                 historical_identifiers=[dict(source=row.source, value=history.decode(row.value))
+                                                         for row in historical_ids[spec.name]],
+                                 historical_search=[history.decode(row.search_text)
+                                                    for row in historical_ids[spec.name]])
     return result
 
 
