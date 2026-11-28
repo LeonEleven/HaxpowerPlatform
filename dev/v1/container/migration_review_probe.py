@@ -166,14 +166,20 @@ def _proof(tag):
 
     task = task_for("partial")
     _approve(task)
-    committed = service.execute(task["task"], task["version"])[0]
     _, path = path_for(task)
     original = path.read_bytes()
-    path.write_bytes(b"X" + original[1:])
-    blocked = service.execute(task["task"], task["version"])[0]
-    require(blocked["code"] == "STALE_MIGRATION_FILE_INTEGRITY" and
+    apply = service._apply
+
+    def corrupt_after_first_group(*args):
+        result = apply(*args)
+        path.write_bytes(b"X" + original[1:])
+        return result
+
+    with patch.object(service, "_apply", side_effect=corrupt_after_first_group):
+        committed, blocked = service.execute(task["task"], task["version"], max_groups=2)
+    require(committed["state"] == "Completed" and blocked["code"] == "STALE_MIGRATION_FILE_INTEGRITY" and
             service.execute(task["task"], task["version"], group=committed["group"])[0] == committed,
-            "partial run lost its committed receipt or ignored tampering")
+            "partial run lost its committed receipt or skipped a group integrity check")
     path.write_bytes(original)
 
     task = task_for("meta")
@@ -196,6 +202,20 @@ def _proof(tag):
     frappe.db.set_value(store.APPROVAL, task["version"], "version_id", "0" * 32)
     frappe.db.commit()
     denied(xlsx.MigrationError, lambda: service.execute(task["task"], task["version"]), "MIGRATION_EVIDENCE_INTEGRITY")
+
+    task = task_for("oldversion")
+    frappe.db.rollback()
+    task_doc = store.record(store.TASK, task["task"])
+    _, prior = service._version(task_doc, task["version"])
+    del prior["proof"]
+    task["digest"] = formats.digest(prior)
+    frappe.db.set_value(store.VERSION, task["version"], {"source_proof": None, "plan_digest": task["digest"]})
+    frappe.db.commit()
+    require(service.preview(task["task"])["digest"] == task["digest"], "pre-fix preview is unreadable")
+    denied(xlsx.MigrationError, lambda: _approve(task), "MIGRATION_EVIDENCE_REVIEW_REQUIRED")
+    revised = service.revise(task["task"], task["version"], [])
+    _approve(revised)
+    _drain(revised)
 
 
 def _conflicts(site, actor, settings, tag, spec):
@@ -361,6 +381,7 @@ def run(site):
 
 
 def _scale(site, actor, settings, tag):
+    from haxpower_v1.catalog.persistence import SPECIFICATION
     from haxpower_v1.catalog.sku_persistence import SKU
     from haxpower_v1.migration import demo, formats, service, store
 
@@ -393,7 +414,17 @@ def _scale(site, actor, settings, tag):
             require(counts["Specifications"] == (261 if label == "incremental" else 260) and
                     counts["SKUs"] == (550 if label == "incremental" else 548) and counts["Brands"] == 3,
                     f"scale unexpected identities: {counts}")
-            metrics.append((label, blocked, len(groups), counts, round(reviewed-started, 2), round(finished-reviewed, 2)))
+            expected, _ = demo._synthetic(second=label == "incremental")
+            spec_ids = [row.target_id for row in mappings if row.entity_type == "Specifications"]
+            value_count = frappe.db.count("HP V1 Product Attribute Value", {"parent": ["in", spec_ids]})
+            require(value_count == len(expected[formats.LEGACY_ATTR]), "technical attributes did not round-trip at scale")
+            changed = _target(task, _group(task, "Specifications", "S0002"))
+            expected_name = expected[formats.LEGACY_SPEC][1]["material_spec_name"]
+            require(frappe.db.get_value(SPECIFICATION, changed, "display_name") == expected_name
+                    and frappe.db.count(SKU, {"specification": changed, "display_name": expected_name}) == 3,
+                    "initial/replayed/incremental specification and SKU values diverged")
+            metrics.append((label, blocked, len(groups), counts, value_count,
+                            round(reviewed-started, 2), round(finished-reviewed, 2)))
             print(f"V1-16B scale phase: {metrics[-1]}", flush=True)
         require(snapshots[0] == snapshots[1] and all(snapshots[2][key] == target for key, target in snapshots[0].items()),
                 "scale replay or delta replaced stable identities")
@@ -413,7 +444,7 @@ def _scale(site, actor, settings, tag):
             "parent": ["in", sku_ids], "kind": "LEGACY",
         }) == 550, "technical attributes or lossless legacy rows missing")
         print(f"V1-16B scale generated in {generated:.2f}s, technical={values}, spec_history={history}; "
-              f"(phase, initial blocks, groups, mappings, preview/review seconds, execute seconds): {metrics}")
+              f"(phase, initial blocks, groups, mappings, technical rows, preview/review seconds, execute seconds): {metrics}")
 
 
 def scale(site):
