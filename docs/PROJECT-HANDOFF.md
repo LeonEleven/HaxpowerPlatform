@@ -8,6 +8,8 @@
 
 **2026-11-28（Asia/Shanghai）核对。** [PR #29](https://github.com/LeonEleven/HaxpowerPlatform/pull/29) 已于 2026-11-27 16:29 手动合并，远端 main 为 [`1ed9e04a96a8ead29e6a17bc71e7affb97235306`](https://github.com/LeonEleven/HaxpowerPlatform/commit/1ed9e04a96a8ead29e6a17bc71e7affb97235306)。项目负责人已批准 B01、B03 和 B10 共 33 项业务规则。下一步为架构评审本次文档 PR，由项目负责人手动合并。拆分提案经合并成为规划基线后，从 V1-16A 正式主数据规则完善开始编写任务书并取得实施授权。V1-16A/B/C 全程不改变库存数量，V1-17 专项签核后执行正式原生入账与逐桶核对。 [项目决策](DECISIONS.md#12-b01-b03-b10-正式业务规则) · [V1-16 需求及规划](V1-16-REQUIREMENTS.md) · [开发 Backlog](V1-DEVELOPMENT-BACKLOG.md#v1-16-拆分规划)
 
+**2026-11-28（Asia/Shanghai）PR #31 复审补充。** SKU LEGACY 采用版本化转义存储并保留旧记录事实，修复产品模型章节编号。复现、升级与授权检索证据见原 PR。 [PR #31 验收证据](https://github.com/LeonEleven/HaxpowerPlatform/pull/31) · [正式建档](PRODUCT-MODEL.md#16-v1-16a-正式建档)
+
 ## 项目与开发环境
 
 - 项目面向船舶配件企业。V1 管理库存数量、动态产品属性、多品牌 SKU、多仓多库位、可空批次和两阶段移库。现有约 1 名主要操作员、10 名查询人员、3 个仓库，SKU 估计在 1000 种以内。员工通过互联网浏览器访问，企业已有阿里云 Linux 服务器。采购、销售、业务成本及财务留待后续。 [产品需求](PRD.md) · [项目决策](DECISIONS.md)

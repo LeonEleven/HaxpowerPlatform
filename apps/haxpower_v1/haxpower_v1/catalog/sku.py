@@ -1,5 +1,6 @@
 """Internal, permission-checked Brand and SKU operations."""
 
+from collections import defaultdict, deque
 from collections.abc import Sequence
 from dataclasses import replace
 from unicodedata import normalize
@@ -8,7 +9,7 @@ from uuid import uuid4
 import frappe
 
 from ..adapters.erpnext import item
-from . import numbers, service as catalog
+from . import history, numbers, service as catalog
 from . import validation as check
 from .dto import ACTIVE, INACTIVE
 from .persistence import (
@@ -19,6 +20,8 @@ from .sku_persistence import BRAND, SKU
 
 IDENTIFIER_KINDS = ("OEM", "MANUFACTURER", "ENGRAVING", "LEGACY", "OTHER")
 IMMUTABLE_FIELDS = ("code", "specification", "brand", "stock_uom", "quantity_precision")
+IDENTIFIER_SEARCH = """CASE WHEN identifier.kind = 'LEGACY' AND identifier.legacy_v1 IS NOT NULL
+    THEN JSON_VALUE(identifier.legacy_v1, '$.search') ELSE identifier.search_text END"""
 
 
 def _load(doctype, record_id):
@@ -85,19 +88,42 @@ def _sku_fields(data):
     )
 
 
+def _legacy_data(row):
+    if row.get("legacy_v1") is None:
+        # These are the facts as persisted by V1-15 and the original V1-16A.
+        return row.value, row.source or "", row.search_text
+    stored = history.decode(row.legacy_v1)
+    return stored["value"], stored["source"], stored["search"]
+
+
+def identifier_data(row):
+    value, source = (row.value, row.source)
+    if row.kind == "LEGACY" and row.get("legacy_v1") is not None:
+        value, source, _ = _legacy_data(row)
+    return dict(kind=row.kind, value=value, source=source, notes=row.notes)
+
+
+def _legacy_facts(doc):
+    return tuple(_legacy_data(row) for row in doc.identifiers if row.kind == "LEGACY")
+
+
 def _attachment_rows(doc, *, identifiers, aliases):
     for table, values, dto in (("identifiers", identifiers, Identifier), ("aliases", aliases, Alias)):
         if values is None:
             continue
         if not isinstance(values, Sequence) or len(values) > 100 or any(not isinstance(v, dto) for v in values):
             frappe.throw(f"Provide up to 100 typed {table} per SKU.")
-        previous = {(row.value, row.source or "") for row in doc.get(table) or ()
-                    if table == "identifiers" and row.kind == "LEGACY"}
+        previous = defaultdict(deque)
+        if table == "identifiers":
+            for row in doc.identifiers:
+                if row.kind == "LEGACY":
+                    previous[_legacy_data(row)[:2]].append(row)
         doc.set(table, [])
         for row in values:
-            value = check.text(row.value, "Identifier or alias", 140, required=True)
             if table == "identifiers" and row.kind == "LEGACY":
-                value = row.value
+                _append_legacy(doc, row, previous)
+                continue
+            value = check.text(row.value, "Identifier or alias", 140, required=True)
             fields = dict(value=value, search_text=check.text(_search_text(value), "Search text", 140),
                           source=check.text(row.source, "Source", 140))
             if table == "identifiers":
@@ -107,12 +133,35 @@ def _attachment_rows(doc, *, identifiers, aliases):
                 fields.update(language=check.text(row.language, "Alias language", 35),
                               searchable=check.boolean(row.searchable, "Alias searchable"))
             doc.append(table, fields)
-        if previous and not previous.issubset((row.value, row.source or "") for row in doc.identifiers
-                                              if row.kind == "LEGACY"):
+        if any(previous.values()):
             frappe.throw("Existing historical SKU identifiers must be retained.")
 
 
+def _append_legacy(doc, row, previous):
+    notes = check.text(row.notes, "Identifier notes", 4000)
+    if isinstance(row.value, str) and isinstance(row.source, str) and (
+        existing := previous.get((row.value, row.source))
+    ):
+        saved = doc.append("identifiers", existing.popleft())
+        saved.idx = len(doc.identifiers)
+        saved.notes = notes
+        return
+    check.text(row.value, "Identifier", 140, required=True)
+    check.text(row.source, "Source", 140)
+    search = check.text(_search_text(row.value), "Search text", 140)
+    doc.append("identifiers", dict(kind="LEGACY", value="LEGACY", notes=notes,
+                                  legacy_v1=history.encode(dict(value=row.value, source=row.source, search=search))))
+
+
+def _persisted_sku(doc, expected_legacy):
+    saved = _load(SKU, doc.name)
+    if _legacy_facts(saved) != expected_legacy:
+        frappe.throw("The stored historical SKU identifiers differ from the requested values.")
+    return _stock_item(saved, locked=True)
+
+
 def _stock_item(doc, *, locked=False):
+    identifiers = [identifier_data(row) for row in doc.identifiers]
     return StockItem(
         id=doc.name, revision=doc.revision, status=doc.status,
         data=SKUData(code=doc.code, specification=doc.specification, brand=doc.brand,
@@ -120,8 +169,8 @@ def _stock_item(doc, *, locked=False):
                      quantity_precision=doc.quantity_precision),
         brand=_brand(_load(BRAND, doc.brand)) if doc.brand else None,
         identifiers=tuple(
-            Identifier(kind=row.kind, value=row.value, source=row.source or "", notes=row.notes or "")
-            for row in doc.identifiers
+            Identifier(kind=row["kind"], value=row["value"], source=row["source"] or "", notes=row["notes"] or "")
+            for row in identifiers
         ),
         aliases=tuple(
             Alias(value=row.value, language=row.language or "", source=row.source or "", searchable=bool(row.searchable))
@@ -196,8 +245,9 @@ def _create_sku(data, identifiers, aliases, *, fixture, existing_item):
         )
         _attachment_rows(doc, identifiers=identifiers, aliases=aliases)
         item.bind_item(doc, adopt=existing_item is not None)
+        expected_legacy = _legacy_facts(doc)
         doc.insert(ignore_permissions=True, set_name=sku_id)
-        result = _stock_item(doc, locked=True)
+        result = _persisted_sku(doc, expected_legacy)
         if result.mapping_status != "Verified":
             frappe.throw("ERPNext did not persist the requested SKU mapping.")
         return result
@@ -225,8 +275,9 @@ def edit_sku(
         if fields["display_name"] != doc.display_name:
             item.update_item_name(doc, fields["display_name"])
         doc.update(dict(fields, revision=doc.revision + 1))
+        expected_legacy = _legacy_facts(doc)
         doc.save(ignore_permissions=True)
-        result = _stock_item(doc, locked=True)
+        result = _persisted_sku(doc, expected_legacy)
         if result.mapping_status != "Verified":
             frappe.throw("The native Item did not retain the requested SKU changes.")
         return result
@@ -329,7 +380,7 @@ def search_sku_ids(query, *, limit=None, offset=0, include_inactive=False, categ
     for token in tokens:
         matched = tuple(key for key, searchable in spec_search.items() if token in searchable)
         conditions.append(
-            """(sku.specification IN %s
+            f"""(sku.specification IN %s
              OR LOCATE(BINARY %s, BINARY sku.search_text)
              OR LOCATE(BINARY %s, BINARY brand.search_text)
              OR EXISTS (SELECT 1 FROM `tabHP V1 Product Alias` alias
@@ -338,7 +389,7 @@ def search_sku_ids(query, *, limit=None, offset=0, include_inactive=False, categ
              OR EXISTS (SELECT 1 FROM `tabHP V1 Product Identifier` identifier
                         WHERE identifier.parent = sku.name AND identifier.parenttype = %s
                           AND identifier.parentfield = 'identifiers'
-                          AND LOCATE(BINARY %s, BINARY identifier.search_text)))"""
+                          AND LOCATE(BINARY %s, BINARY ({IDENTIFIER_SEARCH}))))"""
         )
         params.extend((matched or ("",), token, token, SKU, token, SKU, token))
     where = " AND ".join(conditions) or "1 = 1"
@@ -346,10 +397,10 @@ def search_sku_ids(query, *, limit=None, offset=0, include_inactive=False, categ
                  WHERE {where}"""
     sort, sort_params = "ORDER BY sku.code, sku.name", ()
     if normalized:
-        sort = """ORDER BY (BINARY LOWER(sku.code) = BINARY %s) DESC,
-        EXISTS (SELECT 1 FROM `tabHP V1 Product Identifier` exact_id
-                WHERE exact_id.parent=sku.name AND exact_id.parenttype=%s AND exact_id.parentfield='identifiers'
-                AND BINARY exact_id.search_text=BINARY %s) DESC,
+        sort = f"""ORDER BY (BINARY LOWER(sku.code) = BINARY %s) DESC,
+        EXISTS (SELECT 1 FROM `tabHP V1 Product Identifier` identifier
+                WHERE identifier.parent=sku.name AND identifier.parenttype=%s AND identifier.parentfield='identifiers'
+                AND BINARY ({IDENTIFIER_SEARCH})=BINARY %s) DESC,
         (sku.specification IN %s) DESC, sku.code, sku.name"""
         sort_params = (normalized, SKU, normalized, exact_specs or ("",))
     page = " LIMIT %s OFFSET %s" if limit is not None else ""

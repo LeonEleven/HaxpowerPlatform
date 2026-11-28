@@ -13,6 +13,7 @@ from identity import require
 
 UPGRADE_CODE = "P999999"
 PENDING_CODE = "P999998"
+BASELINE_IDENTIFIERS = ("OLD-SKU-001", r'"\u003c"')
 LEGACY_READER = "v1-legacy-catalog-reader@example.invalid"
 
 
@@ -21,7 +22,7 @@ def seed_upgrade():
     from haxpower_v1.adapters.erpnext import item
     from haxpower_v1.catalog import service, sku
     from haxpower_v1.catalog.dto import SpecificationData
-    from haxpower_v1.catalog.sku_dto import SKUData
+    from haxpower_v1.catalog.sku_dto import Identifier, SKUData
     from haxpower_v1.catalog.sku_persistence import SKU
     from sku_probe import PREFIX
 
@@ -37,7 +38,9 @@ def seed_upgrade():
             }}):
                 sku.create_sku(SKUData(code=f"{code}-999", specification=spec.id, brand=base.brand,
                                        display_name="Synthetic reserved suffix", stock_uom=base.stock_uom,
-                                       quantity_precision=base.quantity_precision))
+                                       quantity_precision=base.quantity_precision),
+                               identifiers=[Identifier(kind="LEGACY", value=value, source="Synthetic V1-15")
+                                            for value in BASELINE_IDENTIFIERS])
     actor = frappe.get_doc(
         doctype="User", email="v1-legacy-catalog@example.invalid", first_name="Synthetic legacy maintenance",
         send_welcome_email=0, roles=[{"role": "HP V1 Catalog Maintainer"}],
@@ -96,6 +99,10 @@ def verify_upgrade():
         frappe.set_user("Administrator")
 
     existing = frappe.get_doc(SKU, frappe.db.get_value(SKU, {"code": UPGRADE_CODE + "-999"}))
+    require(tuple(row.value for row in sku.get_sku(existing.name).identifiers) == BASELINE_IDENTIFIERS,
+            "V1-15 LEGACY identifiers changed during schema upgrade")
+    for value in BASELINE_IDENTIFIERS:
+        require(sku.search_sku_ids(value) == ((existing.name,), 1), "V1-15 LEGACY search changed during upgrade")
     pending = service.get_specification(frappe.db.get_value(SPECIFICATION, {"code": PENDING_CODE}))
     active = service.get_specification(existing.specification)
     require(active.data.stock_uom == existing.stock_uom and pending.data.stock_uom in (None, ""),

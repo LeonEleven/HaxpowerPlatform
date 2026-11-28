@@ -151,7 +151,14 @@ def verify_master_data_upgrade(state, baseline, *, failed=False):
     require(len(added) == (0 if failed else 1), "unexpected parameter role migration state")
     comparable_access = dict(state["access"], roles=[role for role in roles if role not in added])
     comparable_catalog = dict(state["catalog"], **{"HP V1 Product Specification": old_spec})
-    require(dict(state, access=comparable_access, catalog=comparable_catalog,
+    table = "HP V1 Product Identifier"
+    previous_ids = baseline["sku"]["tables"][table]
+    current_ids = state["sku"]["tables"][table]
+    require("legacy_v1" in current_ids["schema"]
+            and current_ids["rows"] == [dict(row, legacy_v1=None) for row in previous_ids["rows"]],
+            "legacy SKU identifier facts changed during schema upgrade")
+    comparable_sku = dict(state["sku"], tables=dict(state["sku"]["tables"], **{table: previous_ids}))
+    require(dict(state, access=comparable_access, catalog=comparable_catalog, sku=comparable_sku,
                  formal_catalog=baseline["formal_catalog"]) == baseline,
             "V1-16A migration changed native stock, other domain histories or assigned grants")
     require(set(state["formal_catalog"]) == {"HP V1 Specification Identifier", "HP V1 Catalog Number",

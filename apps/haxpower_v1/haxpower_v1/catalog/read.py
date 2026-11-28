@@ -107,6 +107,8 @@ def searchable_text(spec):
 
 
 def by_ids(ids, *, details=False, include_specification=False):
+    from .sku import identifier_data
+
     if not ids:
         return {}
     include_specification = include_specification or details
@@ -118,7 +120,7 @@ def by_ids(ids, *, details=False, include_specification=False):
     skus = rows(SKU, fields, {"name": ("in", tuple(ids))})
     specs = specification_rows({"name": ("in", tuple({row.specification for row in skus}))}) if include_specification else {}
     brands = {row.name: label(row) for row in rows(BRAND, "name code display_name")}
-    identifiers = children("HP V1 Product Identifier", SKU, "identifiers", "kind value source notes", ids) if details else {}
+    identifiers = children("HP V1 Product Identifier", SKU, "identifiers", "kind value source notes search_text legacy_v1", ids) if details else {}
     aliases = children("HP V1 Product Alias", SKU, "aliases", "value language source searchable", ids) if details else {}
     result = {}
     for row in skus:
@@ -130,7 +132,7 @@ def by_ids(ids, *, details=False, include_specification=False):
         if details:
             result[row.name].update(
                 description=row.description or "",
-                identifiers=[{k: v for k, v in item.items() if k != "parent"} for item in identifiers[row.name]],
+                identifiers=[identifier_data(item) for item in identifiers[row.name]],
                 aliases=[{k: v for k, v in item.items() if k not in ("parent", "searchable")} for item in aliases[row.name]],
                 images=[], attachments=[],
             )

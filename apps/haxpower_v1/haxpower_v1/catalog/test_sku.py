@@ -75,6 +75,41 @@ class TestSKU(IntegrationTestCase):
             roles=[{"role": role}],
         ).insert(ignore_permissions=True).name
 
+    def test_legacy_identifier_round_trip_and_edit_retention(self):
+        originals = (
+            "OLD-SKU-001", "OLD-<test>-001", r'"\u003c"\path', "00012345",
+            "  ＯＬＤ-<raw>-SPACE  ", "<" * 140,
+        )
+        identifiers = tuple(Identifier(kind="LEGACY", value=value, source="  Source <legacy>  ")
+                            for value in originals)
+        saved = sku.create_fixture_sku(self.data, identifiers=identifiers)
+        self.assertEqual(saved.identifiers, identifiers)
+        for value in originals:
+            self.assertEqual(sku.search_sku_ids(value, candidates=[saved.id]), ((saved.id,), 1))
+        public = read.by_ids([saved.id], details=True)[saved.id]["identifiers"]
+        self.assertEqual(public, [asdict(identifier) for identifier in identifiers])
+        for changed in (identifiers[1:], (replace(identifiers[0], value="Replacement"), *identifiers[1:]),
+                        (replace(identifiers[0], source="Replacement"), *identifiers[1:])):
+            with self.assertRaisesRegex(frappe.ValidationError, "must be retained"):
+                sku.edit_sku(saved.id, saved.data, expected_revision=saved.revision, identifiers=changed)
+        with self.assertRaisesRegex(frappe.ValidationError, "140 characters"):
+            sku.edit_sku(saved.id, saved.data, expected_revision=saved.revision,
+                         identifiers=(*identifiers, Identifier(kind="LEGACY", value=">" * 141)))
+        updated = tuple(replace(entry, notes="Updated note") for entry in reversed(identifiers))
+        sku.edit_sku(saved.id, saved.data, expected_revision=saved.revision, identifiers=updated)
+        self.assertEqual(sku.get_sku(saved.id).identifiers, updated)
+
+    def test_legacy_identifier_search_preserves_exact_order_and_duplicate_pages(self):
+        token = 'OLD-<TEST>-' + self.code
+        exact = Identifier(kind="LEGACY", value=token)
+        partial = replace(exact, value=f"PREFIX-{token}")
+        first = sku.create_fixture_sku(self.data, identifiers=[partial])
+        second = sku.create_fixture_sku(replace(self.data, code=f"{self.code}-B"), identifiers=[exact])
+        third = sku.create_fixture_sku(replace(self.data, code=f"{self.code}-C"), identifiers=[exact])
+        for offset, expected in enumerate((second.id, third.id, first.id)):
+            self.assertEqual(sku.search_sku_ids(token, limit=1, offset=offset), ((expected,), 3))
+        self.assertEqual(sku.search_sku_ids(token, stock_fields_only=True), ((), 0))
+
     def test_two_brands_search_and_identity_without_stock_changes(self):
         baseline = {doctype: frappe.db.count(doctype) for doctype in NO_STOCK_WRITES}
         other = sku.save_brand(BrandData(code=f"{self.code}-B", display_name="合成 Beta"))
