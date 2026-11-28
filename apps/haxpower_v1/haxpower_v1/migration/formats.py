@@ -72,6 +72,7 @@ class Candidate:
     legacy_code: str | None = None
     issues: list[str] = field(default_factory=list)
     raw_digest: str | None = None
+    historical_status: list | None = None
 
     @property
     def key(self):
@@ -130,7 +131,7 @@ def _parse_field(row, name):
     return value
 
 
-def parse(source, namespace, files):
+def parse(source, namespace, files, *, snapshot_entities=()):
     if not isinstance(namespace, str) or not SOURCE_KEY.fullmatch(namespace):
         raise xlsx.MigrationError("INVALID_DATASET")
     if source not in (STANDARD, LEGACY):
@@ -148,13 +149,15 @@ def parse(source, namespace, files):
         instructions = sheets.pop("Instructions", ())
         if len(instructions) != 1 or _text(instructions[0], "version") != STANDARD:
             raise xlsx.MigrationError("TEMPLATE_VERSION")
+        if not set(snapshot_entities) <= sheets.keys():
+            raise xlsx.MigrationError("SNAPSHOT_SHEET_MISSING")
         candidates = _standard(namespace, sheets)
     else:
         if set(sheets) != set(schema):
             raise xlsx.MigrationError("WORKBOOK_SHEETS")
         candidates = _legacy(namespace, sheets)
     rows = [row for entries in sheets.values() for row in entries]
-    if (len(rows) > MAX_SOURCE_ROWS or not candidates or len(candidates) > MAX_GROUPS or
+    if (len(rows) > MAX_SOURCE_ROWS or (not candidates and not snapshot_entities) or len(candidates) > MAX_GROUPS or
             sum(len(cell.value or "") for row in rows for cell in row.cells.values()) > 8_000_000):
         raise xlsx.MigrationError("MIGRATION_ROW_LIMIT")
     raw = {row.key: row for row in rows}
@@ -252,6 +255,51 @@ def _value(item, attribute, value, option, row, *, value_kind=None):
     })
 
 
+def _status(candidate, row):
+    cell = row.cells["status"]
+    candidate.historical_status = [cell.kind, cell.value]
+    value = (cell.value or "").strip().upper()
+    if not value:
+        issue = "LEGACY_STATUS_MISSING"
+    elif value in {"INACTIVE", "DISABLED", "停用", "禁用"}:
+        issue = "LEGACY_STATUS_REVIEW_INACTIVE"
+    elif value in {"ACTIVE", "启用"} and cell.kind == "text":
+        issue = "LEGACY_STATUS_REVIEW_REQUIRED"
+    else:
+        issue = "LEGACY_STATUS_UNRECOGNIZED"
+    candidate.issues.append(issue)
+
+
+def _legacy_classification(code, approved, companies, terms):
+    if not code:
+        return None
+    separated = re.fullmatch(r"[A-Za-z][A-Za-z0-9]*[-_./]([0-9]{4})[-_./].+", code)
+    if separated:
+        # This legacy export layout already makes the class boundary explicit.
+        return separated[1] if separated[1] in approved else None
+    if not re.fullmatch(r"[A-Z0-9]+", code):
+        return None
+    parses = []
+    for company in companies:
+        if not code.startswith(company):
+            continue
+        remainder = code[len(company):]
+        category, tail = remainder[:4], remainder[4:]
+        if category in approved:
+            for term in terms:
+                if tail.startswith(term) and len(tail) > len(term):
+                    parses.append(category)
+    return parses[0] if len(parses) == 1 else None
+
+
+def _matches_legacy_specification(sku_code, spec_code):
+    if not sku_code or not spec_code or not sku_code.startswith(spec_code):
+        return False
+    suffix = sku_code[len(spec_code):]
+    return (not suffix or suffix[0] in "-_./" or
+            bool(re.fullmatch(r"[0-9]{3}", suffix) and suffix != "000"))
+
+
 def _legacy(namespace, sheets):
     output = []
     unique = {}
@@ -280,9 +328,20 @@ def _legacy(namespace, sheets):
         return code if code in CATEGORIES and not issues else None
 
     approved = defaultdict(set)
+    conflicted = defaultdict(set)
+    companies = defaultdict(set)
+    terms = defaultdict(set)
     for (company, _), row in unique[LEGACY_CONFIG].items():
+        raw_code = _text(row, "config_code") or ""
         if code := config_reference(company, row):
             approved[company].add(code)
+        elif raw_code in CATEGORIES:
+            conflicted[company].add(raw_code)
+        else:
+            if re.fullmatch(r"[A-Z][A-Z0-9]{1,7}", raw_code):
+                companies[company].add(raw_code)
+            if re.fullmatch(r"[A-Z][A-Z0-9]{2,3}", raw_code):
+                terms[company].add(raw_code)
     source_spec = {}
     for (company, identity), row in unique[LEGACY_SPEC].items():
         code = _text(row, "material_spec_code")
@@ -293,9 +352,11 @@ def _legacy(namespace, sheets):
         }
         item = Candidate("Specifications", source(company), identity, "upsert", fields, [row.key],
                          legacy_code=code)
-        tokens = set(re.split(r"[^A-Za-z0-9]+", code or "")) & CATEGORIES.keys()
-        if len(tokens) == 1 and tokens <= approved[company]:
-            fields["category"] = "code:" + next(iter(tokens))
+        _status(item, row)
+        category = _legacy_classification(code, approved[company] - conflicted[company],
+                                          companies[company], terms[company])
+        if category:
+            fields["category"] = "code:" + category
         else:
             item.issues.append("UNVERIFIED_LEGACY_CATEGORY")
         if not code:
@@ -348,11 +409,10 @@ def _legacy(namespace, sheets):
                   "display_name": spec.fields["display_name"] if spec else None,
                   "description": _text(row, "remark")}
         item = Candidate("SKUs", source(company), identity, "upsert", fields, [row.key], legacy_code=code)
+        _status(item, row)
         if not spec:
             item.issues.append("MISSING_SPECIFICATION")
-        elif not code or not spec.legacy_code or not (
-            code == spec.legacy_code or any(code.startswith(spec.legacy_code + mark) for mark in "-_./")
-        ):
+        elif not _matches_legacy_specification(code, spec.legacy_code):
             item.issues.append("LEGACY_SKU_CODE_RELATION")
         if not code:
             item.issues.append("INVALID_LEGACY_CODE")

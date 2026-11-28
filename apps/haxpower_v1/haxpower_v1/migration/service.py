@@ -1,6 +1,7 @@
 """Authorized synchronous backend entry points for master data migration."""
 
 from dataclasses import asdict
+from hashlib import sha256
 import json
 from pathlib import Path
 from time import sleep
@@ -11,9 +12,10 @@ from frappe.utils import now_datetime
 
 from ..access import policy
 from ..catalog.persistence import SPECIFICATION
+from ..inventory.operations.dto import StockError
 from ..inventory.operations.transaction import connection
 from ..reporting import private_files
-from . import catalog, formats, plan, store, xlsx
+from . import catalog, formats, plan, reconciliation, snapshots, store, xlsx
 
 OP = policy.Operation
 AREA = private_files.Area.MIGRATION
@@ -61,15 +63,17 @@ def _save_file(task_id, source, name, content, pending, *, purpose="source", ide
     return {"id": identity, "name": name, "sha256": digest, "size": size}
 
 
-def _file(task_id, file_id, *, expected=None, for_download=False):
+def _file(task_id, file_id, *, expected=None, source=None, for_download=False):
     entry = store.record(store.FILE, _valid_id(file_id))
     if entry.task_id != task_id:
+        if expected is not None:
+            raise xlsx.MigrationError("MIGRATION_FILE_INTEGRITY")
         policy.deny()
     if for_download and entry.purpose == "report":
         _permission(OP.EXPORT)
     name = store.unpack(entry.original_name)
-    if expected and (name, entry.sha256, entry.byte_count) != (
-            expected["name"], expected["sha256"], expected["size"]):
+    if expected and (name, entry.sha256, entry.byte_count, entry.purpose, entry.source_version) != (
+            expected["name"], expected["sha256"], expected["size"], "source", source):
         raise xlsx.MigrationError("MIGRATION_FILE_INTEGRITY")
     return name, private_files.read(entry.name, entry.byte_count, entry.sha256, area=AREA)
 
@@ -105,7 +109,8 @@ def _decisions(records, candidates, actor):
     known = {candidate.key: candidate for candidate in candidates}
     output = {}
     decision_size = 0
-    allowed = {"keys", "reason", "skip", "target_id", "target_code", "fields", "drop_rows", "action"}
+    allowed = {"keys", "reason", "skip", "target_id", "target_code", "fields", "drop_rows", "action",
+               "legacy_status", "accept_source", "keep_local", "ack_missing", "ack_issues"}
     for entry in records:
         if not isinstance(entry, dict) or set(entry) - allowed:
             raise xlsx.MigrationError("INVALID_REVIEW_DECISION")
@@ -122,10 +127,22 @@ def _decisions(records, candidates, actor):
                 any(value is not None and (not isinstance(value, str) or len(value) > 140)
                     for value in (entry.get("target_id"), entry.get("target_code")))):
             raise xlsx.MigrationError("INVALID_REVIEW_DECISION")
+        resolutions = [entry.get(name, []) for name in ("accept_source", "keep_local", "ack_issues")]
+        if (any(type(items) is not list or len(items) > 256 or
+                any(not isinstance(value, str) or len(value) > 100 for value in items) for items in resolutions)
+                or set(resolutions[0]) & set(resolutions[1])
+                or not set(resolutions[2]) <= plan.ACKNOWLEDGE
+                or "legacy_status" in entry and entry["legacy_status"] != "activate"
+                or type(entry.get("ack_missing", False)) is not bool):
+            raise xlsx.MigrationError("INVALID_REVIEW_DECISION")
         for key in keys:
             if not isinstance(key, str) or key not in known or key in output:
                 raise xlsx.MigrationError("INVALID_REVIEW_DECISION")
             candidate = known[key]
+            if ("legacy_status" in entry and candidate.historical_status is None
+                    or entry.get("ack_missing") and candidate.kind != "Missing"
+                    or candidate.historical_status is not None and "status" in patch):
+                raise xlsx.MigrationError("INVALID_REVIEW_DECISION")
             valid_fields = set(formats.FIELDS.get(candidate.kind, "").split())
             if candidate.kind == "Specifications":
                 valid_fields.add("values")
@@ -159,43 +176,94 @@ def _decisions(records, candidates, actor):
     return output
 
 
-def _preview(task, parent, manifest, rows, entries, decisions):
+def _preview(task, parent, manifest, rows, entries, decisions, complete):
     with store.quiet():
         groups = plan.Preview(task.source_version, entries, decisions).run()
-    evidence = {
-        "task": task.name, "parent": parent, "manifest": manifest, "decisions": decisions,
-        "groups": groups, "source": {"format": task.source_version, "dataset": task.dataset},
-    }
-    identity = store.insert(store.VERSION, task_id=task.name, parent_version=parent,
-                            manifest=store.pack(manifest), decisions=store.pack(decisions),
-                            plan=store.pack(groups), plan_digest=formats.digest(evidence))
+    chunks = []
     for ordinal in range(0, len(rows), 64):
         raw = [asdict(row) for row in rows[ordinal:ordinal + 64]]
-        store.insert(store.SOURCE, version_id=identity, ordinal=ordinal, evidence=store.pack(raw),
-                     sha256=formats.digest(raw))
+        packed = store.pack(raw)
+        chunks.append((ordinal, packed, formats.digest(raw)))
+    proof = {"scope": complete, "rows": [[ordinal, digest, sha256(packed.encode("ascii")).hexdigest()]
+                                         for ordinal, packed, digest in chunks]}
+    evidence = {
+        "task": task.name, "parent": parent, "manifest": manifest, "decisions": decisions,
+        "groups": groups, "source": {"format": task.source_version, "dataset": task.dataset}, "proof": proof,
+    }
+    digest = formats.digest(evidence)
+    identity = store.insert(store.VERSION, task_id=task.name, parent_version=parent, manifest=store.pack(manifest),
+                            decisions=store.pack(decisions), plan=store.pack(groups), plan_digest=digest,
+                            source_proof=store.pack(proof))
+    for ordinal, packed, checksum in chunks:
+        store.insert(store.SOURCE, version_id=identity, ordinal=ordinal, evidence=packed, sha256=checksum)
     store.update(store.TASK, task.name, {"state": "Pending Review", "current_version": identity})
-    return {"task": task.name, "version": identity, "digest": formats.digest(evidence),
-            "groups": len(groups), "blocked": sum(group["action"] == "blocked" for group in groups)}
+    return {"task": task.name, "version": identity, "digest": digest, "groups": len(groups),
+            "blocked": sum(group["action"] == "blocked" for group in groups)}
 
 
-def _version(task, version):
+def _version(task, version, cache=None):
     entry = store.record(store.VERSION, _valid_id(version))
     if entry.task_id != task.name:
         policy.deny()
-    data = {
-        "task": task.name, "parent": entry.parent_version or None, "manifest": store.unpack(entry.manifest),
-        "decisions": store.unpack(entry.decisions), "groups": store.unpack(entry.plan),
-        "source": {"format": task.source_version, "dataset": task.dataset},
-    }
-    store.verify(data, entry.plan_digest)
+    signature = (entry.name, entry.parent_version, entry.manifest, entry.decisions, entry.plan, entry.plan_digest,
+                 entry.source_proof, task.name, task.source_version, task.dataset)
+    if cache is not None and cache.get("signature") == signature:
+        return entry, cache["data"]
+    try:
+        data = {
+            "task": task.name, "parent": entry.parent_version or None, "manifest": store.unpack(entry.manifest),
+            "decisions": store.unpack(entry.decisions), "groups": store.unpack(entry.plan),
+            "source": {"format": task.source_version, "dataset": task.dataset},
+        }
+        if entry.source_proof:
+            data["proof"] = store.unpack(entry.source_proof)
+        store.verify(data, entry.plan_digest)
+    except (ValueError, TypeError, store.DecodeError):
+        raise xlsx.MigrationError("MIGRATION_EVIDENCE_INTEGRITY") from None
+    if cache is not None:
+        cache.update(signature=signature, data=data)
     return entry, data
 
 
-def upload(source, dataset, uploads, *, task_id=None, expected_version=None):
+def _evidence_files(task, data):
+    try:
+        return [(entry["id"], *_file(task.name, entry["id"], expected=entry, source=task.source_version))
+                for entry in data["manifest"]]
+    except (StockError, frappe.PermissionError, ValueError, TypeError, KeyError, store.DecodeError):
+        raise xlsx.MigrationError("MIGRATION_FILE_INTEGRITY") from None
+
+
+def _verify_evidence(task, version, data):
+    if "proof" not in data:
+        raise xlsx.MigrationError("MIGRATION_EVIDENCE_REVIEW_REQUIRED")
+    _evidence_files(task, data)
+    chunks = frappe.db.sql(
+        """select ordinal, sha256, sha2(evidence, 256) from `tabHP V1 Migration Source`
+           where version_id = %s order by ordinal""", (version,),
+    )
+    if [list(chunk) for chunk in chunks] != data["proof"]["rows"]:
+        raise xlsx.MigrationError("MIGRATION_SOURCE_INTEGRITY")
+
+
+def _approval(version, digest):
+    try:
+        row = store.record(store.APPROVAL, version)
+        data = store.unpack(row.evidence)
+        store.verify(data, row.sha256)
+        if (row.version_id != version or data["version"] != version or row.plan_digest != digest
+                or data["digest"] != digest or row.owner != data["actor"]):
+            raise ValueError("APPROVAL_IDENTITY")
+    except (ValueError, TypeError, KeyError, store.DecodeError, frappe.PermissionError):
+        raise xlsx.MigrationError("MIGRATION_EVIDENCE_INTEGRITY") from None
+    return data
+
+
+def upload(source, dataset, uploads, *, task_id=None, expected_version=None, complete_snapshot=None):
     """Create a task or append replacement files and an unapproved preview."""
     _authorize(OP.MIGRATION_OPERATE)
     supplied = _read_uploads(uploads)
-    rows, entries = formats.parse(source, dataset, supplied)
+    complete = snapshots.scope(source, complete_snapshot)
+    rows, entries = formats.parse(source, dataset, supplied, snapshot_entities=complete["entities"] if complete else ())
     pending = []
     try:
         with connection(read_committed=True) as db:
@@ -211,7 +279,8 @@ def upload(source, dataset, uploads, *, task_id=None, expected_version=None):
                 task = store.record(store.TASK, task_id)
             manifest = [_save_file(task_id, source, filename, content, pending, identity=identity)
                         for identity, filename, content in supplied]
-            response = _preview(task, task.current_version or None, manifest, rows, entries, {})
+            entries += snapshots.differences(source, dataset, complete, rows, entries)
+            response = _preview(task, task.current_version or None, manifest, rows, entries, {}, complete)
             db.commit()
             return response
     except Exception:
@@ -233,10 +302,13 @@ def revise(task_id, expected_version, decisions):
         task = store.record(store.TASK, _valid_id(task_id), lock=True)
         _current(task, expected_version)
         _, data = _version(task, expected_version)
-        supplied = [(entry["id"], *_file(task.name, entry["id"], expected=entry)) for entry in data["manifest"]]
-        rows, candidates = formats.parse(task.source_version, task.dataset, supplied)
+        supplied = _evidence_files(task, data)
+        complete = data.get("proof", {}).get("scope")
+        rows, candidates = formats.parse(task.source_version, task.dataset, supplied,
+                                        snapshot_entities=complete["entities"] if complete else ())
+        candidates += snapshots.differences(task.source_version, task.dataset, complete, rows, candidates)
         validated = _decisions(decisions, candidates, policy.active_actor(locked=True))
-        response = _preview(task, expected_version, data["manifest"], rows, candidates, validated)
+        response = _preview(task, expected_version, data["manifest"], rows, candidates, validated, complete)
         db.commit()
         return response
 
@@ -251,15 +323,17 @@ def approve(task_id, version, digest, reason):
         entry, data = _version(task, version)
         if task.state != "Pending Review" or entry.plan_digest != digest:
             raise xlsx.MigrationError("MIGRATION_VERSION_INACTIVE")
+        _verify_evidence(task, version, data)
         if any(group["action"] == "blocked" for group in data["groups"]):
             raise xlsx.MigrationError("UNRESOLVED_MIGRATION_GROUP")
-        if not any(group["action"] != "skip" for group in data["groups"]):
+        executable = any(group["action"] != "skip" for group in data["groups"])
+        if not executable and not data["proof"]["scope"]:
             raise xlsx.MigrationError("EMPTY_EXECUTION_PLAN")
         evidence = {"actor": policy.active_actor(locked=True), "at": now_datetime().isoformat(), "reason": reason,
                     "digest": digest, "version": version}
         store.insert(store.APPROVAL, version, version_id=version, plan_digest=digest,
                      evidence=store.pack(evidence), sha256=formats.digest(evidence))
-        store.update(store.TASK, task.name, {"state": "Approved"})
+        store.update(store.TASK, task.name, {"state": "Approved" if executable else "Completed"})
         db.commit()
         return evidence
 
@@ -277,7 +351,8 @@ def preview(task_id, version=None, *, offset=0, limit=50):
             store.verify(approval, approvals.sha256)
         return {"task": task.name, "state": task.state, "current": entry.name == task.current_version,
                 "version": entry.name, "digest": entry.plan_digest, "manifest": data["manifest"],
-                "source": data["source"], "parent_version": data["parent"], "approval": approval,
+                "source": data["source"], "complete_snapshot": data.get("proof", {}).get("scope"),
+                "parent_version": data["parent"], "approval": approval,
                 "total": len(data["groups"]), "groups": selected,
                 "decisions": {group["key"]: data["decisions"][group["key"]] for group in selected
                               if group["key"] in data["decisions"]},
@@ -333,7 +408,8 @@ def report(task_id, version):
             entry, data = _version(task, version)
             results = _recent_results(entry.name)
             headers = ["group", "entity", "namespace", "source identity", "disposition", "target", "issues", "result"]
-            rows = ([group["key"], group["kind"], group["namespace"], group["source_id"], group["action"],
+            rows = ([group["key"], group["candidate"].get("entity", group["kind"]), group["namespace"],
+                     group["source_id"], group["action"],
                      results.get(group["key"], {}).get("target") or group["target"], ", ".join(group["issues"]),
                      results.get(group["key"], {}).get("state")] for group in data["groups"])
             stream = BytesIO()
@@ -349,18 +425,27 @@ def report(task_id, version):
         raise
 
 
-def _recent_results(version, keys=None):
+def _recent_results(version, keys=None, *, decoded=None):
     if keys == []:
         return {}
     filters = {"version_id": version}
     if keys is not None:
         filters["group_key"] = ["in", keys]
-    rows = frappe.get_all(store.RESULT, filters=filters, fields=["group_key", "evidence", "sha256"],
+    rows = frappe.get_all(store.RESULT, filters=filters, fields=["name", "group_key", "evidence", "sha256"],
                           order_by="creation asc, name asc")
     recent = {}
     for row in rows:
-        result = store.unpack(row.evidence)
-        store.verify(result, row.sha256)
+        signature = (row.group_key, row.evidence, row.sha256)
+        cached = decoded.get(row.name) if decoded is not None else None
+        if cached and cached[0] == signature:
+            result = cached[1]
+        else:
+            result = store.unpack(row.evidence)
+            store.verify(result, row.sha256)
+            if result.get("group") != row.group_key:
+                raise xlsx.MigrationError("MIGRATION_RESULT_INTEGRITY")
+            if decoded is not None:
+                decoded[row.name] = (signature, result)
         recent[row.group_key] = result
     return recent
 
@@ -394,21 +479,20 @@ def _guard(group, results):
             raise catalog.Blocked("STALE_CATEGORY_TEMPLATE")
 
 
-def _write_mapping(source, group, target, state, version, approved):
+def _write_mapping(source, group, target, state, version, approved, previous, results):
     identity = plan.mapping_key(source, group)
-    current_target, previous = plan._map(source, group)
-    if current_target and current_target != target:
-        raise catalog.Blocked("SOURCE_IDENTITY_ALREADY_BOUND")
-    if group["action"] == "unchanged" and previous.get("source") == group["source"]:
-        # Confirm the version without adopting manual local edits as source state.
-        store.update(store.IDENTITY, identity, {"latest_version": version})
-        return
-    evidence = {"source": group["source"], "target": state, "plan_digest": approved["digest"],
-                "reviewer": approved["actor"], "reviewed_at": approved["at"], "rows": group["rows"],
-                "executor": policy.active_actor(locked=True)}
+    attributes = [_resolve(value, results) for value in group.get("confirmed_attributes", ())]
+    evidence = {"source": group["source"], "business_source": reconciliation.business(group["source"], reconciliation.upstream(previous)),
+                "target": state, "baseline": reconciliation.advance(previous, group, state, attributes),
+                "baseline_complete": not previous or previous.get("baseline_complete", False),
+                "plan_digest": approved["digest"], "reviewer": approved["actor"], "reviewed_at": approved["at"],
+                "rows": group["rows"], "executor": policy.active_actor(locked=True),
+                "reviewed_legacy_status": group.get("reviewed_legacy_status"),
+                "confirmed_fields": sorted([*group.get("confirmed_fields", ()),
+                                            *(reconciliation.ATTRIBUTE_PREFIX + key for key in attributes)])}
     values = dict(target_id=target, latest_version=version,
                   source_digest=formats.digest(group["source"]), evidence=store.pack(evidence))
-    if current_target:
+    if previous:
         store.update(store.IDENTITY, identity, values)
     else:
         store.insert(store.IDENTITY, identity, source_system=formats.SOURCE_SYSTEM[source], source_namespace=store.pack(group["namespace"]),
@@ -454,7 +538,7 @@ def _apply(task, version, group, results, approved):
             elif state.get(field) != expected:
                 raise catalog.Blocked("CATALOG_PERSISTENCE_DIFFERENCE")
     try:
-        _write_mapping(task.source_version, group, target, state, version, approved)
+        _write_mapping(task.source_version, group, target, state, version, approved, previous, results)
     except (catalog.Blocked, frappe.QueryDeadlockError, frappe.PermissionError):
         raise
     except Exception:
@@ -462,30 +546,26 @@ def _apply(task, version, group, results, approved):
     return {"target": target, "target_digest": formats.digest(state)}
 
 
-def _execute(task_id, version, requested, seen):
+def _execute(task_id, version, requested, seen, cache):
     with connection(read_committed=True) as db:
         _authorize(OP.MIGRATION_EXECUTE, lock=True)
         _catalog_lock()
         task = store.record(store.TASK, _valid_id(task_id), lock=True)
+        preview_doc, data = _version(task, version, cache)
+        results = _recent_results(version, decoded=cache.setdefault("results", {}))
+        if requested and results.get(requested, {}).get("state") == "Completed":
+            return results[requested]
         _current(task, version, allow_completed=True)
         if task.state not in {"Approved", "Executing", "Failed", "Completed"}:
             raise xlsx.MigrationError("MIGRATION_NOT_APPROVED")
-        preview_doc, data = _version(task, version)
-        approval = store.record(store.APPROVAL, version)
-        approved = store.unpack(approval.evidence)
-        store.verify(approved, approval.sha256)
-        if preview_doc.plan_digest != approval.plan_digest or approved["digest"] != approval.plan_digest:
-            raise xlsx.MigrationError("MIGRATION_EVIDENCE_INTEGRITY")
+        approved = _approval(version, preview_doc.plan_digest)
         groups = {group["key"]: group for group in data["groups"] if group["action"] != "skip"}
-        results = _recent_results(version)
         completed = {key for key, result in results.items() if result["state"] == "Completed"}
         executable = [group for key, group in groups.items() if key not in completed | seen
                       and set(group["dependencies"]) <= completed]
         if requested:
             if requested not in groups:
                 raise xlsx.MigrationError("UNKNOWN_MIGRATION_GROUP")
-            if requested in completed:
-                return results[requested]
             executable = [group for group in executable if group["key"] == requested]
             if not executable:
                 raise xlsx.MigrationError("MIGRATION_DEPENDENCY_PENDING")
@@ -502,6 +582,10 @@ def _execute(task_id, version, requested, seen):
         db.savepoint(savepoint)
         with store.quiet():
             try:
+                try:
+                    _verify_evidence(task, version, data)
+                except xlsx.MigrationError as error:
+                    raise catalog.Blocked("STALE_" + str(error)) from None
                 result.update(_apply(task, version, group, results, approved))
             except (frappe.QueryDeadlockError, frappe.PermissionError):
                 raise
@@ -535,10 +619,11 @@ def execute(task_id, version, *, group=None, max_groups=1):
         raise xlsx.MigrationError("MIGRATION_EXECUTION_LIMIT")
     seen = set()
     results = []
+    cache = {}
     for _ in range(max_groups):
         for attempt in range(DEADLOCK_RETRIES + 1):
             try:
-                result = _execute(task_id, version, group, seen)
+                result = _execute(task_id, version, group, seen, cache)
                 break
             except frappe.QueryDeadlockError:
                 if attempt == DEADLOCK_RETRIES:
@@ -565,7 +650,7 @@ def template(path):
         raise xlsx.MigrationError("MIGRATION_TEMPLATE_OUTPUT") from None
 
 
-def upload_paths(source, dataset, paths, *, task_id=None, expected_version=None):
+def upload_paths(source, dataset, paths, *, task_id=None, expected_version=None, complete_snapshot=None):
     """Bench-only convenience. Reauthorize before opening local files."""
     if getattr(frappe.local, "request", None) is not None:
         policy.deny()
@@ -579,4 +664,5 @@ def upload_paths(source, dataset, paths, *, task_id=None, expected_version=None)
                 uploads.append((path.name, stream.read(xlsx.MAX_FILE + 1)))
     except OSError:
         raise xlsx.MigrationError("MIGRATION_SOURCE_READ") from None
-    return upload(source, dataset, uploads, task_id=task_id, expected_version=expected_version)
+    return upload(source, dataset, uploads, task_id=task_id, expected_version=expected_version,
+                  complete_snapshot=complete_snapshot)

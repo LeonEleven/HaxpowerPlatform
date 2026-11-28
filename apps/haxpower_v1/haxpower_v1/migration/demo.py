@@ -25,6 +25,9 @@ def _synthetic(*, second=False, small=False):
     standard = defaultdict(list)
     standard["Instructions"].append({"version": formats.STANDARD})
     definitions = {row["code"]: row for row in config["attributes"]}
+    for code in ("SF", "D28", "D128"):
+        legacy[formats.LEGACY_CONFIG].append(dict(id=code, company_id="DEMO", config_code=code,
+                                                  config_name="Synthetic old code"))
     for category in config["categories"]:
         code = category["code"]
         legacy[formats.LEGACY_CONFIG].append(dict(id=code, company_id="DEMO", config_code=code,
@@ -44,7 +47,10 @@ def _synthetic(*, second=False, small=False):
         category = config["categories"][(index - 1) % len(config["categories"])]
         code = category["code"]
         key = f"S{index:04d}"
-        historical = f"DEMO-{code}-S{index:04d}<legacy>" if index == 1 else f"DEMO-{code}-S{index:04d}"
+        term = "D28" if index % 2 else "D128"
+        historical = f"SF{code}{term}B{index:04d}"
+        if index == 1 or index % 3 == 0:
+            historical = f"DEMO-{code}-S{index:04d}" + ("<legacy>" if index == 1 else "")
         display = f"{category['display_name']} 合成件 Engine sample {index:04d}"
         if second and index == 2:
             display += " Rev B"
@@ -55,7 +61,7 @@ def _synthetic(*, second=False, small=False):
         standard["Historical Identifiers"].append(dict(key=key, target_type="Specifications", target=key,
                                                        source="SYNTHETIC", value=historical))
         legacy[formats.LEGACY_SPEC].append(dict(id=key, company_id="DEMO", material_spec_code=historical,
-                                               material_spec_name=display, material_spec_unit=uom))
+                                               material_spec_name=display, material_spec_unit=uom, status="ACTIVE"))
         attrs = [*config["common_attributes"], *category["attributes"]]
         pairs = [(name, 1) for name in attrs]
         if index <= 140:
@@ -98,16 +104,18 @@ def _synthetic(*, second=False, small=False):
             if small and index == 1 and brand_index in (1, 2):
                 brand = ("UNBRANDED", "UNKNOWN-BRAND")[brand_index - 1]
                 legacy_brand = None
-            sku_code = f"{historical}-{brand_index}"
+            sku_code = f"{historical}{brand_index:03d}" if historical.startswith("SF") else f"{historical}-{brand_index}"
             standard["SKUs"].append(dict(key=sku_key, action="update" if second and index == 2 else "create",
                                          specification=key, brand=brand, display_name=display, stock_uom=uom))
             standard["Historical Identifiers"].append(dict(key=sku_key, target_type="SKUs", target=sku_key,
                                                            source="SYNTHETIC", value=sku_code))
             legacy[formats.LEGACY_SKU].append(dict(id=sku_key, company_id="DEMO", material_code=sku_code,
-                                                  material_spec_id=key, factory_brand=legacy_brand))
+                                                  material_spec_id=key, factory_brand=legacy_brand, status="ACTIVE"))
     if small:
         sku = legacy[formats.LEGACY_SKU]
         sku[0]["material_code"] = "CONFLICT-001"
+        for index, status in enumerate((None, "SYNTHETIC-UNKNOWN", "INACTIVE")):
+            sku[index]["status"] = status
         sku[-1]["material_spec_id"] = "UNKNOWN"
         sku.append(dict(sku[-2]))
         attr = legacy[formats.LEGACY_ATTR]

@@ -46,8 +46,10 @@ class Blocked(ValueError):
 def _serialize(value):
     if isinstance(value, OptionSelection):
         return value.id
-    if isinstance(value, (Decimal, date)):
-        return str(value)
+    if isinstance(value, Decimal):
+        return format(value, "f")
+    if isinstance(value, date):
+        return value.isoformat()
     return value
 
 
@@ -95,6 +97,8 @@ def matching(kind, payload):
         query = {"code": payload["code"]}
     elif kind == "Options" and isinstance(payload["attribute"], str):
         query = {"attribute": payload["attribute"], "option_key": payload["option_key"]}
+    elif kind == "SKUs" and all(isinstance(payload.get(key), str) for key in ("specification", "brand")):
+        query = {name: payload[name] for name in ("specification", "brand")}
     elif kind == "Templates" and all(isinstance(payload[key], str) for key in ("category", "attribute")):
         query = {name: payload[name] for name in ("category", "attribute")}
     else:
@@ -120,10 +124,8 @@ def similar(kind, payload):
 
 
 def template(category):
-    return {row.name: digest(asdict(service._data(TemplateData, row))) for row in map(
-        lambda identity: frappe.get_doc(TEMPLATE, identity),
-        frappe.get_all(TEMPLATE, filters={"category": category}, pluck="name"),
-    )}
+    return {row.name: digest(asdict(service._data(TemplateData, row)))
+            for row in service._template_rows(category)}
 
 
 def template_rules(category):

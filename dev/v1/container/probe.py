@@ -135,6 +135,10 @@ def main(action, site):
                 ignore_permissions=True
             )
             frappe.db.commit()
+        elif action in {"master-migration-review", "master-migration-scale"}:
+            from migration_review_probe import run, scale
+
+            (scale if action.endswith("scale") else run)(site)
         elif action in {"master-migration", "master-migration-recovered"}:
             from migration_probe import recovered, run
 

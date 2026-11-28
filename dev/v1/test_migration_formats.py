@@ -111,7 +111,17 @@ class MigrationFormatsTest(unittest.TestCase):
         self.assertEqual(len(standard["Attributes"]), 23)
         sheets = {key: demo._table(value.split(), legacy[key]) for key, value in formats.LEGACY_FIELDS.items()}
         _, candidates = formats.parse(formats.LEGACY, "synthetic", [("file", "raw.xlsx", workbook(sheets))])
-        self.assertFalse([entry.issues for entry in candidates if entry.issues])
+        self.assertFalse([entry.issues for entry in candidates
+                          if set(entry.issues) - {"LEGACY_STATUS_REVIEW_REQUIRED"}])
+        self.assertEqual(sum(entry.issues == ["LEGACY_STATUS_REVIEW_REQUIRED"] for entry in candidates), 808)
+        self.assertTrue(formats._matches_legacy_specification("SF0019D28B006001", "SF0019D28B006"))
+        self.assertFalse(formats._matches_legacy_specification("SF0019D28B008001", "SF0019D28B006"))
+        classify = formats._legacy_classification
+        self.assertEqual(classify("SF0019D28B006", {"0019"}, {"SF"}, {"D28"}), "0019")
+        self.assertEqual(classify("SF0019D128B006", {"0019"}, {"SF"}, {"D128"}), "0019")
+        self.assertIsNone(classify("SF0019D28B006", {"0019"}, {"SF"}, {"D28", "D28B"}))
+        self.assertIsNone(classify("ZZ0019D28B006", {"0019"}, {"SF"}, {"D28"}))
+        self.assertIsNone(classify("SF0010D280019", {"0019"}, {"SF"}, {"D28"}))
         self.assertEqual({entry.namespace for entry in candidates}, {"synthetic/DEMO"})
         self.assertTrue(any(entry.legacy_code and "<legacy>" in entry.legacy_code for entry in candidates))
         second, _ = demo._synthetic(second=True)

@@ -7,6 +7,8 @@ import json
 from uuid import uuid4
 import zlib
 
+DecodeError = zlib.error
+
 import frappe
 from frappe.model.document import Document
 

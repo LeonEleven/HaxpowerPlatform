@@ -9,7 +9,7 @@ import frappe
 
 from ..catalog import validation
 from ..catalog.dto import ACTIVE, BOOLEAN, DATE, MULTI, MULTI_SELECT, SELECT_TYPES, SINGLE, TEXT
-from . import catalog, formats
+from . import catalog, formats, reconciliation
 from .catalog import Blocked
 
 MAPPING = "HP V1 Migration Identity"
@@ -48,7 +48,12 @@ def _source_content(entry):
     if "history" in vals:
         vals["history"] = sorted(vals["history"])
     return {"fields": vals, "legacy_code": entry["legacy_code"], "operation": entry["action"],
-            "raw_digest": entry["raw_digest"]}
+            "raw_digest": entry["raw_digest"], "historical_status": entry["historical_status"]}
+
+
+def acknowledges(decision, issue):
+    return bool(decision) and (issue in decision.get("ack_issues", ()) or
+                               set(decision) <= {"reason", "actor", "at", "rows"})
 
 
 def _decide(entry, decisions):
@@ -67,7 +72,7 @@ def _decide(entry, decisions):
         ]
     resolved = set()
     for issue in entry["issues"]:
-        if issue in ACKNOWLEDGE:
+        if issue in ACKNOWLEDGE and acknowledges(choice, issue):
             resolved.add(issue)
         elif issue == "UNVERIFIED_LEGACY_CATEGORY" and "category" in fields:
             resolved.add(issue)
@@ -201,7 +206,7 @@ class Preview:
                 supplied[key].append(pair)
             if len(supplied[key]) > 1 and rules[key]["value_mode"] != MULTI:
                 raise Blocked("SINGLE_VALUE_CONFLICT")
-        if duplicates and not self.decisions.get(group["key"]):
+        if duplicates and not acknowledges(self.decisions.get(group["key"], {}), "DUPLICATE_ATTRIBUTE_VALUE"):
             raise Blocked("DUPLICATE_ATTRIBUTE_VALUE")
         result = {key: [[key, val] for val in values] for key, values in previous.items()}
         result.update(supplied)
@@ -243,16 +248,31 @@ class Preview:
         result["source"] = source_content
         result["candidate"] = entry["fields"]
         result["issues"] = entry["issues"]
+        if kind == "Missing" and (decision.get("skip") or decision.get("ack_missing")):
+            result.update(action="skip", target=entry["fields"]["target"], source_id=entry["fields"]["source_identity"],
+                          issues=["SOURCE_RECORD_MISSING"])
+            return
         if decision.get("skip") or kind == "Evidence" and not entry["issues"]:
             result["action"] = "skip"
             return
+        if kind == "Missing":
+            result.update(target=entry["fields"]["target"], source_id=entry["fields"]["source_identity"])
+            return
         action = entry["action"]
         target, previous = _map(self.source, entry)
+        legacy_status = entry["historical_status"]
+        if legacy_status is not None:
+            prior_status = previous.get("reviewed_legacy_status")
+            if decision.get("legacy_status") == "activate" or prior_status == legacy_status:
+                result["reviewed_legacy_status"] = legacy_status
+                result["issues"] = [issue for issue in result["issues"] if not issue.startswith("LEGACY_STATUS_")]
         same_source = target and previous.get("source") == source_content and not decision
-        if entry["issues"] and not same_source:
+        if result["issues"] and (not same_source or any(
+                issue.startswith("LEGACY_STATUS_") for issue in result["issues"])):
             return
         result["prior_mapping"] = formats.digest(previous) if previous else None
         result["previous_source"] = previous.get("source")
+        result["previous_business_source"] = reconciliation.upstream(previous) if previous else None
         current = {}
         if entry["target_id"] or entry["target_code"]:
             explicit, current = catalog.lookup(kind, entry["target_id"], entry["target_code"])
@@ -277,6 +297,8 @@ class Preview:
         if previous and kind == "SKUs" and current["native_item"] != previous["target"]["native_item"]:
             raise Blocked("NATIVE_ITEM_MAPPING_CONFLICT")
 
+        if legacy_status is not None and current and current.get("status") != ACTIVE:
+            raise Blocked("LEGACY_TARGET_STATUS_CONFLICT")
         if same_source:
             result.update(action="unchanged", projected=current, issues=[])
             self.claims.setdefault((kind, target), result["key"])
@@ -326,11 +348,11 @@ class Preview:
             prior_values = current.get("values", {})
             rows = entry["fields"].get("values", [])
             if previous and "values" not in decision.get("fields", {}) and not decision.get("drop_rows"):
-                earlier = _upstream_values(previous["source"]["fields"].get("values", []))
+                earlier = _upstream_values(reconciliation.upstream(previous)["fields"].get("values", []))
                 incoming = _upstream_values(source_content["fields"].get("values", []))
                 rows = [row for row in rows if earlier.get(row["attribute"]) != incoming.get(row["attribute"])]
             if (self.source == formats.LEGACY and not entry["fields"].get("values") and not prior_values and
-                    not decision):
+                    not acknowledges(decision, "MISSING_OPTIONAL_TECHNICAL_VALUES")):
                 raise Blocked("MISSING_OPTIONAL_TECHNICAL_VALUES")
             values = self._values(result, rows, projected["category"], prior_values)
             if rows:
@@ -348,11 +370,8 @@ class Preview:
                     projected.get("quantity_precision") not in (None, precision) or
                     spec.get("quantity_precision") not in (None, precision)):
                 raise Blocked("SKU_SPECIFICATION_UNIT_CONFLICT")
-            brand = projected["brand"]
-            specification = projected["specification"]
-            if not target and isinstance(brand, str) and isinstance(specification, str):
-                if frappe.db.get_value(catalog.SKU, {"specification": specification, "brand": brand}, "name"):
-                    raise Blocked("SKU_BRAND_ALREADY_EXISTS")
+            if not target and catalog.matching(kind, projected):
+                raise Blocked("SKU_BRAND_ALREADY_EXISTS")
         if kind in {"Specifications", "SKUs"}:
             history = entry["fields"].get("history", [])
             if entry["legacy_code"]:
@@ -365,7 +384,7 @@ class Preview:
             if additions := [value for value in history if value not in current.get("history", ())]:
                 payload["history"] = sorted(set(map(tuple, additions)))
 
-        upstream = previous.get("source", {}).get("fields", {})
+        upstream = reconciliation.upstream(previous)["fields"]
         patches = decision.get("fields", {})
         changed = {
             name: value for name, value in payload.items()
@@ -374,20 +393,37 @@ class Preview:
                 upstream.get(name) != source_content["fields"].get(name)
             )
         }
-        if "values" in changed and all(isinstance(pair[0], str) for pair in changed["values"]):
-            proposed = defaultdict(list)
-            for attr, value in changed["values"]:
-                proposed[attr].append(value)
-            prior = current.get("values", {})
-            if proposed.keys() == prior.keys() and all(sorted(map(formats.digest, vals)) ==
-                    sorted(map(formats.digest, prior[attr])) for attr, vals in proposed.items()):
-                del changed["values"]
+        attributes = defaultdict(list)
+        new_attributes = {}
+        for attribute, value in changed.get("values", ()):
+            if isinstance(attribute, str):
+                attributes[reconciliation.ATTRIBUTE_PREFIX + attribute].append(value)
+            else:
+                new_attributes[attribute["plan"]] = attribute
+        proposed = {key: sorted(vals, key=formats.digest) for key, vals in attributes.items()}
         if target:
-            drift = [name for name in changed if name != "history" and previous
-                     and current.get(name) != previous["target"].get(name)]
-            if drift and not decision:
+            confirmed, keep, drift = reconciliation.resolve(current, previous, changed, proposed, decision)
+            if drift:
                 result["manual_drift"] = drift
+                result["comparison_baseline"] = {
+                    name: previous.get("baseline", {}).get(name) for name in drift
+                }
                 raise Blocked("MANUAL_TARGET_EDIT")
+            for name in keep - {key for key in keep if key.startswith(reconciliation.ATTRIBUTE_PREFIX)}:
+                changed.pop(name)
+            if "values" in changed:
+                actual = [pair for pair in changed["values"] if not isinstance(pair[0], str) or
+                          reconciliation.ATTRIBUTE_PREFIX + pair[0] not in keep]
+                for name in sorted(keep & attributes.keys()):
+                    actual.extend([name.removeprefix(reconciliation.ATTRIBUTE_PREFIX), value]
+                                  for value in reconciliation.value(current, name))
+                if new_attributes or any(key not in keep and reconciliation.value(current, key) != vals
+                                         for key, vals in proposed.items()):
+                    changed["values"] = actual
+                else:
+                    del changed["values"]
+            result["confirmed_fields"] = sorted(confirmed)
+            result["confirmed_attributes"] = list(new_attributes.values())
             if changed and action == "create":
                 raise Blocked("EXISTING_SOURCE_REQUIRES_UPDATE")
             result["action"] = "update" if changed else "unchanged"
@@ -413,7 +449,7 @@ class Preview:
                       similar=catalog.similar(kind, projected) if not target else [])
 
     def run(self):
-        for kind in (*formats.ORDER, "Evidence"):
+        for kind in (*formats.ORDER, "Evidence", "Missing"):
             for key, entry in self.entries.items():
                 if entry["kind"] == kind:
                     self.build(key)

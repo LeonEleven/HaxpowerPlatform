@@ -9,6 +9,7 @@
     "manifest",
     "decisions",
     "plan",
+    "source_proof",
     "plan_digest"
   ],
   "fields": [
@@ -37,6 +38,11 @@
       "fieldname": "plan",
       "fieldtype": "Long Text",
       "label": "Plan"
+    },
+    {
+      "fieldname": "source_proof",
+      "fieldtype": "Long Text",
+      "label": "Source Proof"
     },
     {
       "fieldname": "plan_digest",

@@ -253,11 +253,13 @@ def integration():
     inspect("stock-correction", SITE)
     inspect("formal-catalog", SITE)
     inspect("master-migration", SITE)
+    inspect("master-migration-review", SITE)
     inspect("inventory-reporting", SITE)
     inspect("inventory-history-scale", SITE)
     clean_with_stock = inspect("snapshot", SITE)
     repeat_migration(SITE, clean_with_stock)
     rehearse_upgrade(clean_with_stock)
+    inspect("master-migration-scale", SITE)
 
 
 def rehearse_upgrade(clean):

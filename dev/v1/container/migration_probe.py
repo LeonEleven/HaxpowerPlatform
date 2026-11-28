@@ -40,10 +40,35 @@ def _group(task, kind, identity):
         require(offset < page["total"], f"source identity missing from {kind}")
 
 
-def _approved(source, dataset, content):
+def _all_groups(task):
     from haxpower_v1.migration import service
 
+    initial = service.preview(task["task"], task["version"], limit=100)
+    return initial["groups"] + [
+        group for offset in range(100, initial["total"], 100)
+        for group in service.preview(task["task"], task["version"], offset=offset, limit=100)["groups"]
+    ]
+
+
+def _explicit_synthetic_status(task):
+    from haxpower_v1.migration import service
+
+    keys = [group["key"] for group in _all_groups(task)
+            if "LEGACY_STATUS_REVIEW_REQUIRED" in group["issues"]
+            and group["source"]["historical_status"] == ["text", "ACTIVE"]]
+    if keys:
+        return service.revise(task["task"], task["version"], [
+            {"keys": keys, "reason": "Reviewed the known synthetic ACTIVE source rows", "legacy_status": "activate"},
+        ])
+    return task
+
+
+def _approved(source, dataset, content):
+    from haxpower_v1.migration import formats, service
+
     task = service.upload(source, dataset, [("master.xlsx", content)])
+    if source == formats.LEGACY:
+        task = _explicit_synthetic_status(task)
     require(not task["blocked"], "synthetic preview unexpectedly blocked")
     service.approve(task["task"], task["version"], task["digest"], "Synthetic review")
     return task
@@ -150,7 +175,9 @@ def run(site):
         before_catalog = (frappe.db.count(SPECIFICATION), frappe.db.count(SKU))
         frappe.set_user(actor)
         try:
-            content = book(_standard("000<old>\\spec", source, f"DR-{tag}"), source)
+            old_spec_code = "000<old>\\spec" + tag
+            original_name = "Synthetic migration rotor " + tag
+            content = book(_standard(old_spec_code, source, f"DR-{tag}", name=original_name), source)
             task = service.upload(source, tag, [("master.xlsx", content)])
             denied(xlsx.MigrationError, lambda: service.execute(task["task"], task["version"]), "MIGRATION_NOT_APPROVED")
             view = service.preview(task["task"])
@@ -198,7 +225,7 @@ def run(site):
                 require(execute("SKUs")["state"] == "Failed", "mapping failure was not persisted")
             frappe.db.rollback()
             require(not frappe.db.exists(SKU, {"specification": spec_id}) and
-                    not frappe.db.exists("Item", {"item_name": "Synthetic migration rotor"}),
+                    not frappe.db.exists("Item", {"item_name": original_name}),
                     "failed mapping left a product or Item")
             frappe.set_user("Administrator")
             frappe.db.delete("Has Role", {"parent": actor, "role": OP.MIGRATION_EXECUTE.role})
@@ -217,9 +244,9 @@ def run(site):
             current_sku = sku.get_sku(imported["target"])
             require(current_sku.data.specification == spec_id and current_sku.mapping_status == "Verified" and
                     current_sku.identifiers[0].value == '00<old>\\-"', "SKU source identity or history changed")
-            require(products.get_specification(spec_id).historical_identifiers[0].value == "000<old>\\spec",
+            require(products.get_specification(spec_id).historical_identifiers[0].value == old_spec_code,
                     "specification history was changed")
-            found, total = sku.search_sku_ids("000<old>\\spec", limit=1, offset=0)
+            found, total = sku.search_sku_ids(old_spec_code, limit=1, offset=0)
             require(current_sku.id in found and total >= 1, "authorized historical search failed")
             exported = exports.generate("products", {"sku_code": current_sku.data.code})
             require(exported["rows"] == 1 and exports.download(exported["export_id"])[1][:2] == b"PK",
@@ -229,7 +256,7 @@ def run(site):
             require(all(group["action"] == "unchanged" for group in service.preview(replay["task"])["groups"]),
                     "repeated source identities did not resolve as unchanged")
             _drain(replay)
-            increment = _standard("000<old>\\spec", source, f"DR-{tag}", name="Synthetic source revision",
+            increment = _standard(old_spec_code, source, f"DR-{tag}", name="Synthetic source revision",
                                   action="update", sku=False)
             changed = _approved(source, tag, book(increment, source))
             spec_group = _group(changed, "Specifications", "001")
@@ -247,7 +274,8 @@ def run(site):
             require(new["blocked"] and _group(new, "Specifications", "001")["issues"] == ["MANUAL_TARGET_EDIT"],
                     "three-way conflict not reported")
             revised = service.revise(new["task"], new["version"],
-                                     [{"keys": [spec_group["key"]], "reason": "Reviewed the manual edit"}])
+                                     [{"keys": [spec_group["key"]], "reason": "Reviewed the manual edit",
+                                       "accept_source": ["display_name"]}])
             service.approve(revised["task"], revised["version"], revised["digest"], "Approved source revision")
             _drain(revised)
             frappe.db.rollback()
@@ -295,13 +323,11 @@ def run(site):
             raw = book(legacy, formats.LEGACY)
             legacy_task = service.upload(formats.LEGACY, "errors-" + tag, [("old.xlsx", raw)])
             require(legacy_task["blocked"] > 0, "legacy anomalies failed to block approval")
-            legacy_preview = service.preview(legacy_task["task"], limit=100)
-            legacy_groups = list(legacy_preview["groups"])
-            for offset in range(100, legacy_preview["total"], 100):
-                legacy_groups.extend(service.preview(legacy_task["task"], offset=offset, limit=100)["groups"])
-            issues = {issue for group in legacy_groups for issue in group["issues"]}
+            legacy_task = _explicit_synthetic_status(legacy_task)
+            issues = {issue for group in _all_groups(legacy_task) for issue in group["issues"]}
             require({"DUPLICATE_OR_INVALID_LEGACY_ID", "EXPLICIT_BRAND_REQUIRED", "MISSING_SPECIFICATION",
-                     "DUPLICATE_ATTRIBUTE_VALUE", "MISSING_OPTIONAL_TECHNICAL_VALUES", "SINGLE_VALUE_CONFLICT"} <= issues,
+                     "DUPLICATE_ATTRIBUTE_VALUE", "MISSING_OPTIONAL_TECHNICAL_VALUES", "SINGLE_VALUE_CONFLICT",
+                     "LEGACY_STATUS_MISSING", "LEGACY_STATUS_UNRECOGNIZED", "LEGACY_STATUS_REVIEW_INACTIVE"} <= issues,
                     f"legacy anomaly evidence incomplete: {issues}")
             denied(xlsx.MigrationError, lambda: service.approve(
                 legacy_task["task"], legacy_task["version"], legacy_task["digest"], "Synthetic"), "UNRESOLVED")
@@ -339,6 +365,13 @@ def run(site):
             require(any(str(entry.after.values[0]) == "13.026" for entry in audits if entry.after.values),
                     "exact legacy Decimal update or native catalog attribute audit is missing")
 
+            if site.endswith("-upgrade.localhost"):
+                _approved(source, "pending-recovery-" + tag, book({
+                    "Instructions": [{"version": source}],
+                    "Brands": [{"key": "RECOVERY", "action": "create", "code": "RECOVERY-" + tag,
+                                "display_name": "Synthetic verified recovery continuation"}],
+                }, source))
+
             frappe.set_user("Administrator")
             frappe.db.delete("Has Role", {"parent": actor, "role": OP.MIGRATION_OPERATE.role})
             frappe.db.commit()
@@ -371,7 +404,10 @@ def recovered():
                            fields=["name", "task_id", "sha256"], order_by="creation asc", limit=1)[0]
     task = frappe.get_doc(store.TASK, entry.task_id)
     require(task.state == "Completed", "recovered task receipt state changed")
-    actor, _ = synthetic_user(uuid4().hex[:8], "recovered", OP.PRODUCT_READ, OP.MIGRATION_OPERATE)
+    actor, _ = synthetic_user(uuid4().hex[:8], "recovered", OP.PRODUCT_READ, OP.MIGRATION_OPERATE,
+                              OP.MIGRATION_EXECUTE, OP.PARAMETER_MAINTAIN)
+    pending = frappe.get_all(store.TASK, filters={"dataset": ["like", "pending-recovery-%"], "state": "Approved"},
+                             fields=["name", "current_version"], limit=1)
     frappe.db.commit()
     frappe.set_user(actor)
     try:
@@ -380,6 +416,8 @@ def recovered():
         content = service.download(task.name, entry.name)[1]
         require(sha256(content).hexdigest() == entry.sha256 and
                 service.preview(task.name)["state"] == "Completed", "recovered source or approval unavailable")
+        require(len(pending) == 1 and service.execute(pending[0].name, pending[0].current_version)[0]["state"]
+                == "Completed", "restored approved source could not be executed")
     finally:
         frappe.set_user("Administrator")
     print("Recovered V1-16B private source and completed task verified under current authorization.")
