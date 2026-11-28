@@ -358,9 +358,9 @@ def verify_product_permissions(fixture, request, client, stock_reader, product_r
             and "specification" not in basic_sheet[0] and term not in str(basic_sheet[1]),
             "Excel field visibility differs from the corresponding employee page")
     if formal:
-        require(legacy_spec in str(full_sheet[1]) and native_id not in str(full_sheet)
-                and native_id not in str(basic_sheet) and "HP-NB-" not in str(full_sheet),
-                "formal workbook lost authorized history or exposed internal Item or Batch")
+        require(legacy_spec in str(full_sheet[1]), "authorized stock workbook omitted specification history")
+        require(native_id not in str(full_sheet) and native_id not in str(basic_sheet)
+                and "HP-NB-" not in str(filtered_sheet), "employee workbook exposed a native Item or Batch")
     manifest = json.loads(frappe.db.get_value(exports.EXPORT, report_id, "columns_json"))
     coverage = json.loads(frappe.db.get_value(exports.EXPORT, filtered_id, "columns_json"))
     require(manifest["columns"] == list(full_sheet[0]) and manifest["product_columns"] == ["specification"]
