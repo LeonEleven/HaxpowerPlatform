@@ -5,6 +5,7 @@ import argparse
 import fcntl
 import hashlib
 import http.client
+from io import BytesIO
 import ipaddress
 import json
 import os
@@ -15,6 +16,7 @@ import socket
 import stat
 import subprocess
 import sys
+import tarfile
 import time
 import tomllib
 
@@ -25,7 +27,10 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 APP = ROOT / "apps/haxpower_v1"
 LOCK = HERE / "versions.lock.json"
-UPGRADE_BASELINE = "b3cf05a06372be9e5e47653d243d250033d00f58"
+UPGRADE_BASELINES = {
+    "v1-15": "b3cf05a06372be9e5e47653d243d250033d00f58",
+    "v1-16a": "f3b43cf522b86fe22dfd4b0012c39005396d36ff",
+}
 TOOLS = HERE / "container"
 OWNER = "org.haxpower.v1.checkout"
 RUNTIME = {"web", "socketio", "worker", "scheduler"}
@@ -407,10 +412,18 @@ class Project:
                                 in RUNTIME for c in containers.values()), "stop runtime before changing Bench or site")
             command = ("exec", "-T", "bench", "python", "/opt/hp-v1/bench.py")
             if action == "integration":
-                baseline = subprocess.check_output(
-                    ["git", "archive", "--format=tar", UPGRADE_BASELINE, "apps/haxpower_v1"], cwd=ROOT,
-                )
-                subprocess.run([*self.compose, *command, action], input=baseline, check=True, env=self.environment)
+                bundle = BytesIO()
+                with tarfile.open(fileobj=bundle, mode="w") as output:
+                    for name, sha in UPGRADE_BASELINES.items():
+                        baseline = subprocess.check_output(
+                            ["git", "archive", "--format=tar", f"--prefix={name}/", sha, "apps/haxpower_v1"],
+                            cwd=ROOT,
+                        )
+                        with tarfile.open(fileobj=BytesIO(baseline)) as archive:
+                            for member in archive.getmembers():
+                                output.addfile(member, archive.extractfile(member) if member.isfile() else None)
+                subprocess.run([*self.compose, *command, action], input=bundle.getvalue(), check=True,
+                               env=self.environment)
             else:
                 self.dc(*command, "enable-scheduler" if action == "start" else action)
             if action == "start":

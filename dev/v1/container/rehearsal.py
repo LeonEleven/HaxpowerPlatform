@@ -182,7 +182,7 @@ def recovery_point(backup):
     return files
 
 
-def rehearse_failure(fixture, previous, check_failure):
+def rehearse_failure(fixture, previous, check_failure, *, candidate=None):
     site_path = SITES / UPGRADE
     samples = {site_path / scope / "files/v1-recovery-sample.txt": f"Synthetic {scope} file\n"
                for scope in ("public", "private")}
@@ -196,7 +196,7 @@ def rehearse_failure(fixture, previous, check_failure):
         if storage.exists():
             shutil.copytree(storage, stored)
         try:
-            deploy_app(fault=True)
+            deploy_app(fixture=candidate, fault=True)
             failure = site_command("migrate", target=UPGRADE, expect_failure=True)
             require("RuntimeError: HP_V1_REHEARSAL_PATCH_FAILURE" in failure
                     and "haxpower_v1.patches.rehearsal_failure" in failure, "missing injected migration diagnostics")
@@ -235,7 +235,7 @@ def integration():
     verify_catalog_schema(clean)
     verify_sku_schema(clean)
     verify_warehouse_schema(clean)
-    verify_access_schema(clean, role_count=14)
+    verify_access_schema(clean, role_count=17)
     verify_batch_schema(clean)
     verify_stock_schema(clean)
     verify_approval_install(clean)
@@ -252,11 +252,14 @@ def integration():
     inspect("approval", SITE)
     inspect("stock-correction", SITE)
     inspect("formal-catalog", SITE)
+    inspect("master-migration", SITE)
+    inspect("master-migration-review", SITE)
     inspect("inventory-reporting", SITE)
     inspect("inventory-history-scale", SITE)
     clean_with_stock = inspect("snapshot", SITE)
     repeat_migration(SITE, clean_with_stock)
     rehearse_upgrade(clean_with_stock)
+    inspect("master-migration-scale", SITE)
 
 
 def rehearse_upgrade(clean):
@@ -283,7 +286,8 @@ def rehearse_upgrade(clean):
             # The host streams only the App directory from the pinned merged commit.
             with tarfile.open(fileobj=sys.stdin.buffer, mode="r|") as archive:
                 archive.extractall(path, filter="data")
-            baseline = Path(path) / "apps/haxpower_v1"
+            baseline = Path(path) / "v1-15/apps/haxpower_v1"
+            formal = Path(path) / "v1-16a/apps/haxpower_v1"
             deploy_app(fixture=baseline)
             version = run(PYTHON, "-c", "import haxpower_v1; print(haxpower_v1.__version__)", capture=True)
             require(version.strip() == "0.16.0", "expected the merged V1-15 app")
@@ -325,20 +329,31 @@ def rehearse_upgrade(clean):
             record("merged V1-15 with native movements, counts, approvals and corrections", baseline_state)
             def failed_upgrade(state):
                 verify_master_data_upgrade(state, baseline_state, failed=True)
-            rehearse_failure(baseline, baseline_state, failed_upgrade)
+            rehearse_failure(baseline, baseline_state, failed_upgrade, candidate=formal)
+            deploy_app(fixture=formal)
+            version = run(PYTHON, "-c", "import haxpower_v1; print(haxpower_v1.__version__)", capture=True)
+            require(version.strip() == "0.17.0", "expected the merged V1-16A app")
+            site_command("migrate", target=UPGRADE)
+            upgraded = inspect("snapshot", UPGRADE)
+            verify_master_data_upgrade(upgraded, baseline_state)
+            inspect("verify-formal-upgrade", UPGRADE)
+            record("V1-16A upgraded from merged V1-15; native inventory and domain histories preserved", upgraded)
+            formal_state = inspect("snapshot", UPGRADE)
+            rehearse_failure(formal, formal_state, lambda failed: require(
+                failed == formal_state, "V1-16B failed migration changed existing catalog or inventory facts"))
         finally:
             deploy_app()
 
-    run_upgraded_rehearsal(clean, baseline_state)
-
-
-def run_upgraded_rehearsal(clean, baseline_state):
     check_bench()
     site_command("migrate", target=UPGRADE)
     upgraded = inspect("snapshot", UPGRADE)
-    verify_master_data_upgrade(upgraded, baseline_state)
-    inspect("verify-formal-upgrade", UPGRADE)
-    record("V1-16A upgraded from merged V1-15; native inventory and domain histories preserved", upgraded)
+    roles = upgraded["access"]["roles"]
+    new_roles = [role for role in roles if role["name"].startswith("HP V1 Migration ")]
+    require(len(new_roles) == 3 and all(not row["disabled"] and not row["desk_access"] for row in new_roles),
+            "migration roles missing or unexpectedly elevated")
+    require(dict(upgraded, access=dict(upgraded["access"], roles=[row for row in roles if row not in new_roles]))
+            == formal_state, "V1-16B upgrade changed existing catalog, stock or evidence")
+    record("V1-16B upgraded from merged V1-16A; catalog, native inventory and domain histories preserved", upgraded)
     verify_upgraded_workflows(clean)
 
 
@@ -365,6 +380,7 @@ def verify_upgraded_workflows(clean):
     # The extended probe rotates the site's generation. Run it after the
     # restored V1-12 Draft has proved continuity with its original snapshot.
     inspect("inventory-reporting", UPGRADE)
+    inspect("master-migration", UPGRADE)
     populated = inspect("snapshot", UPGRADE)
     record("upgraded site with synthetic domain data and warehouse grants", populated)
     repeat_migration(UPGRADE, populated)
@@ -381,6 +397,7 @@ def verify_upgraded_workflows(clean):
 
 def verify_recovered_stock(clean):
     inspect("inventory-reporting-recovered", UPGRADE)
+    inspect("master-migration-recovered", UPGRADE)
     inspect("correction-recovery-finish", UPGRADE)
     inspect("count-recovery-finish", UPGRADE)
     inspect("verify-skus", UPGRADE)

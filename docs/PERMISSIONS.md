@@ -138,3 +138,7 @@ PRODUCT_READ 提供完整业务技术档案和独立目录查询。INVENTORY_REA
 迁移操作、审核、盘点和期初专项签核独立授权且允许人员兼任。最终签核默认准备人与签核人分开，经明确授权的例外可自审并记录授权和原因。签核独立于全局审批开关。授权主体、例外机制和状态机由后续任务设计。仓库数据范围单独校验，上传、读取、审核、冻结、签核和读取文件均须服务端验证所涉范围与当前能力。V1-15 私有导出基础可供复用，安全上传、期初审核和跨仓文件授权待实现和验收。迁移相关搜索、文件与导出延续 V1-15 的产品技术字段隔离和撤权重验。
 
 员工读取历史标识及其筛选结果需要 PRODUCT_READ。库存 Excel 继续按实际技术列与搜索授权记录重验，历史标识随既有规格列或 SKU 标识列投影。站点操作员仍通过 Bench 管理受限升级处置及原生诊断。
+
+## V1-16B 迁移能力
+
+Migration Operate、Migration Review 和 Migration Execute 独立授予，均须同时具备 Product Read。实际创建与更新按组复查 Product Maintain 或 Parameter Maintain。私有下载复查当前 Migration Operate 与 Product Read。报告生成和下载同时需要 Export。 [主数据迁移契约](V1-16B-MASTER-DATA-MIGRATION.md)

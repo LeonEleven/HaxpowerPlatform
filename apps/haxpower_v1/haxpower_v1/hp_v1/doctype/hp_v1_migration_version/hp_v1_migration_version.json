@@ -1,0 +1,55 @@
+{
+  "doctype": "DocType",
+  "name": "HP V1 Migration Version",
+  "module": "HP V1",
+  "engine": "InnoDB",
+  "field_order": [
+    "task_id",
+    "parent_version",
+    "manifest",
+    "decisions",
+    "plan",
+    "source_proof",
+    "plan_digest"
+  ],
+  "fields": [
+    {
+      "fieldname": "task_id",
+      "fieldtype": "Data",
+      "label": "Task Id",
+      "search_index": 1
+    },
+    {
+      "fieldname": "parent_version",
+      "fieldtype": "Data",
+      "label": "Parent Version"
+    },
+    {
+      "fieldname": "manifest",
+      "fieldtype": "Long Text",
+      "label": "Manifest"
+    },
+    {
+      "fieldname": "decisions",
+      "fieldtype": "Long Text",
+      "label": "Decisions"
+    },
+    {
+      "fieldname": "plan",
+      "fieldtype": "Long Text",
+      "label": "Plan"
+    },
+    {
+      "fieldname": "source_proof",
+      "fieldtype": "Long Text",
+      "label": "Source Proof"
+    },
+    {
+      "fieldname": "plan_digest",
+      "fieldtype": "Data",
+      "label": "Plan Digest"
+    }
+  ],
+  "permissions": [],
+  "allow_rename": 0
+}

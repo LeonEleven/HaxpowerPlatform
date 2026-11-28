@@ -100,6 +100,11 @@ def snapshot():
         for table in ("HP V1 Specification Identifier", "HP V1 Catalog Number", "HP V1 Catalog Configuration")
         if frappe.db.table_exists(table)
     }
+    migrations = {}
+    for kind in ("Task", "Version", "File", "Source", "Approval", "Result", "Identity"):
+        table = f"HP V1 Migration {kind}"
+        if frappe.db.table_exists(table) and (records := frappe.get_all(table, fields=["*"], order_by="name")):
+            migrations[table] = records
     posted = {table: frappe.get_all(table, fields=["*"], order_by="name") for table in (
         "Stock Entry", "Stock Entry Detail", "Serial and Batch Bundle", "Serial and Batch Entry",
         "Stock Ledger Entry", "Bin", "GL Entry", "Payment Ledger Entry", "Repost Item Valuation",
@@ -108,7 +113,7 @@ def snapshot():
     return {"access": access, "approval": approval, "batch": batch, "operations": operations, "schema": schema, "rows": rows,
             "patches": logs, "catalog": catalog, "sku": sku,
             "warehouse": warehouse, "posted": posted, "inventory": inventory, "corrections": corrections,
-            "reporting": reporting, "formal_catalog": formal_catalog}
+            "reporting": reporting, "formal_catalog": formal_catalog, "migrations": migrations}
 
 
 def main(action, site):
@@ -130,6 +135,14 @@ def main(action, site):
                 ignore_permissions=True
             )
             frappe.db.commit()
+        elif action in {"master-migration-review", "master-migration-scale"}:
+            from migration_review_probe import run, scale
+
+            (scale if action.endswith("scale") else run)(site)
+        elif action in {"master-migration", "master-migration-recovered"}:
+            from migration_probe import recovered, run
+
+            recovered() if action.endswith("-recovered") else run(site)
         elif action == "formal-catalog":
             from formal_catalog_probe import run
 
