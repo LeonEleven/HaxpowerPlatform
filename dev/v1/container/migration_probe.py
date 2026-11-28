@@ -266,7 +266,7 @@ def run(site):
             frappe.db.rollback()
             custom_spec = products.get_specification(custom_result["target"])
             require(custom_spec.data.stock_uom == "SET" and
-                    [option.key for option in custom_spec.attributes[0].values] == ["0001", "0002"],
+                    {option.key for option in custom_spec.attributes[0].values} == {"0001", "0002"},
                     "new category template, option keys or stock unit drifted during import")
 
             brands = _standard("Distinct brand identities", source, f"UNUSED-{tag}", sku=False)
