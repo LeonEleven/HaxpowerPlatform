@@ -299,7 +299,7 @@ class Preview:
             raise Blocked("INACTIVE_DEPENDENCY")
 
         payload = catalog.normalize(kind, fields, current, create=not target)
-        projected = {**current, **payload}
+        projected = {**catalog.defaults(kind), **current, **payload}
         if kind == "Options":
             definition = related.get("attribute")
             if definition and definition.get("data_type") not in SELECT_TYPES:

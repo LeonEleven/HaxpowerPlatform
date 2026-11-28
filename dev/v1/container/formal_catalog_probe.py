@@ -74,9 +74,9 @@ def denied(exception, operation, message=""):
 def verify_upgrade():
     from haxpower_v1.adapters.erpnext import item
     from haxpower_v1.catalog import migration, service, sku
-    from haxpower_v1.catalog.dto import SpecificationData
+    from haxpower_v1.catalog.dto import HistoricalIdentifier, SpecificationData
     from haxpower_v1.catalog.persistence import SPECIFICATION
-    from haxpower_v1.catalog.sku_dto import SKUData
+    from haxpower_v1.catalog.sku_dto import Identifier, SKUData
     from haxpower_v1.catalog.sku_persistence import SKU
     from haxpower_v1.access.policy import Operation
     from haxpower_v1.reporting import exports
@@ -123,9 +123,13 @@ def verify_upgrade():
         proposed = service.create_specification(
             SpecificationData(category=active.data.category, display_name="Synthetic expanded number",
                               stock_uom=existing.stock_uom), attributes={},
+            historical_identifiers=[HistoricalIdentifier(source="Synthetic V1-16A", value="001<spec>")],
         )
         require(proposed.data.code == "P1000000", "global numbering did not cross the six-digit boundary")
-        new = sku.create_sku(replace(data, specification=active.id))
+        new = sku.create_sku(
+            replace(data, specification=active.id),
+            identifiers=[Identifier(kind="LEGACY", value='001<legacy>\\-"', source="Synthetic V1-16A")],
+        )
         require(new.data.code == UPGRADE_CODE + "-1000", "SKU numbering did not cross the three-digit boundary")
         fixed = service.configure_pending_specification_unit(
             pending.id, existing.stock_uom, expected_revision=pending.revision,

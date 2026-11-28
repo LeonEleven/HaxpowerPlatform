@@ -21,7 +21,7 @@ App 0.18.0 通过 `haxpower_v1.migration.service` 提供同步后端服务。开
 
 ### Haxpower 标准 `haxpower-master-1`
 
-`Instructions` 必须含 `version` 列和一行 `haxpower-master-1`。其余工作表可按需要提供。七张实体表均包含 `key`、`action`、`target_id` 和 `target_code` 四列。实体关联键用纯文本，遵循数据集标识的字符范围，唯一性按表约束。可用表内键或 `key:键` 建立关联，也可用 `id:领域ID` 或适用的 `code:既有正式编码` 直接引用。例如 `code:0011` 指向已存在的分类，参数选项和分类模板使用领域 ID。带 `key:` 的外键以目标实体表中的键为准。
+`Instructions` 必须含 `version`、`usage` 两列和一行 `haxpower-master-1`，`usage` 可留空。其余工作表可按需要提供。七张实体表均包含 `key`、`action`、`target_id` 和 `target_code` 四列。实体关联键用纯文本，遵循数据集标识的字符范围，唯一性按表约束。可用表内键或 `key:键` 建立关联，也可用 `id:领域ID` 或适用的 `code:既有正式编码` 直接引用。例如 `code:0011` 指向已存在的分类，参数选项和分类模板使用领域 ID。带 `key:` 的外键以目标实体表中的键为准。
 
 | 表 | 必填创建字段 | 其余列 |
 |---|---|---|

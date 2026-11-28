@@ -41,7 +41,7 @@ CHILDREN = {
     "Historical Identifiers": "key target_type target source value",
 }
 HEADERS = {
-    "Instructions": ["version"],
+    "Instructions": ["version", "usage"],
     **{sheet: ["key", "action", "target_id", "target_code", *fields.split()] for sheet, fields in FIELDS.items()},
     **{sheet: fields.split() for sheet, fields in CHILDREN.items()},
 }
@@ -77,8 +77,14 @@ class Candidate:
 
 
 def template(stream):
-    xlsx.write(stream, {sheet: [fields, *([[STANDARD]] if sheet == "Instructions" else [])]
-                        for sheet, fields in HEADERS.items()})
+    sheets = {sheet: [fields] for sheet, fields in HEADERS.items()}
+    sheets["Instructions"].append([
+        STANDARD,
+        "Use text for source keys and identifiers. Actions are create, reference or update. "
+        "Link rows by key. Use id: or code: to reference existing catalog records. "
+        "Consult the V1-16B master data migration contract for column types and review.",
+    ])
+    xlsx.write(stream, sheets)
 
 
 def _identity(cell, *, legacy=False):

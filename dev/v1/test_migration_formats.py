@@ -91,7 +91,7 @@ class MigrationFormatsTest(unittest.TestCase):
         self.assertEqual(row.cells["injection"], xlsx.Cell("text", "=2+3"))
 
     def test_standard_version_duplicate_keys_and_columns(self):
-        sheets = {"Instructions": [["version"], [formats.STANDARD]],
+        sheets = {"Instructions": [formats.HEADERS["Instructions"], [formats.STANDARD]],
                   "Brands": [formats.HEADERS["Brands"], ["B", "create"], ["B", "create"]]}
         _, candidates = formats.parse(formats.STANDARD, "synthetic", [("file", "raw.xlsx", workbook(sheets))])
         self.assertEqual([row.issues for row in candidates], [["DUPLICATE_OR_INVALID_KEY"]] * 2)

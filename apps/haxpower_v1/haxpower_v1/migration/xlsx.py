@@ -6,6 +6,7 @@ import re
 from pathlib import PurePosixPath
 from xml.etree import ElementTree as ET
 from zipfile import ZIP_DEFLATED, ZIP_STORED, BadZipFile, ZipFile
+from zlib import error as CompressionError
 
 MAX_FILES = 4
 MAX_FILE = 4 * 1024 * 1024
@@ -220,7 +221,7 @@ def read(name, payload):
         return result
     except MigrationError:
         raise
-    except (BadZipFile, ET.ParseError, KeyError, ValueError, OSError, RuntimeError, EOFError, NotImplementedError):
+    except (BadZipFile, ET.ParseError, KeyError, ValueError, OSError, RuntimeError, EOFError, CompressionError):
         raise MigrationError("WORKBOOK_STRUCTURE") from None
 
 

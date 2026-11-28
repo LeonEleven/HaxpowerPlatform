@@ -1,6 +1,6 @@
 """Migration projections and writes through the formal catalog services."""
 
-from dataclasses import asdict, fields, replace
+from dataclasses import MISSING, asdict, fields
 from datetime import date
 from decimal import Decimal
 import re
@@ -133,6 +133,10 @@ def template_rules(category):
 def unit(name):
     precision = item.configured_precision(name)
     return {"precision": precision, "item_group": item.validate_configuration(name, precision)}
+
+
+def defaults(kind):
+    return {field.name: field.default for field in fields(DTOS[kind]) if field.default is not MISSING}
 
 
 def normalize(kind, supplied, current, *, create):

@@ -230,6 +230,28 @@ def run(site):
                     "immutable unit change was not blocked")
             require(sku.get_sku(imported["target"]).data.stock_uom == "PC", "existing SKU changed units")
 
+            brands = _standard("Distinct brand identities", source, f"UNUSED-{tag}", sku=False)
+            brands["Brands"] = [
+                {"key": code, "action": "reference", "target_code": code}
+                for code in ("UNBRANDED", "UNKNOWN-BRAND")
+            ]
+            brands["SKUs"] = [
+                {"key": code, "action": "create", "specification": "001", "brand": code,
+                 "display_name": "Synthetic distinct special brand"}
+                for code in ("UNBRANDED", "UNKNOWN-BRAND")
+            ]
+            brand_case = _approved(source, "brands-" + tag, book(brands, source))
+            _drain(brand_case)
+            frappe.db.rollback()
+            imported_brands = []
+            for code in ("UNBRANDED", "UNKNOWN-BRAND"):
+                brand_group = _group(brand_case, "SKUs", code)
+                outcome = service.execute(brand_case["task"], brand_case["version"], group=brand_group["key"])[0]
+                imported_brands.append(sku.get_sku(outcome["target"]))
+            require({row.brand.data.code for row in imported_brands} == {"UNBRANDED", "UNKNOWN-BRAND"} and
+                    len({row.data.specification for row in imported_brands}) == 1,
+                    "explicit no-brand and unknown brand were merged")
+
             legacy, _ = demo._synthetic(small=True)
             raw = book(legacy, formats.LEGACY)
             legacy_task = service.upload(formats.LEGACY, "errors-" + tag, [("old.xlsx", raw)])
@@ -259,6 +281,16 @@ def run(site):
             require(any(len(attr.values) > 1 for attr in formal_spec.attributes) and
                     formal_spec.historical_identifiers[0].value == spec_rows[0]["material_spec_code"],
                     "legacy multiselect values or identifier were lost")
+
+            changed_decimal = next(row for row in legal[formats.LEGACY_ATTR] if row["prop_name"] == "芯径φ(mm)")
+            changed_decimal["prop_value"] = "13.026"
+            attr_delta = _approved(formats.LEGACY, tag, book(legal, formats.LEGACY))
+            _drain(attr_delta)
+            updated_group = _group(attr_delta, "Specifications", changed_decimal["material_spec_id"])
+            frappe.db.rollback()
+            audits = products.get_specification_audit(updated_group["target"])
+            require(any(str(entry.after.values[0]) == "13.026" for entry in audits if entry.after.values),
+                    "exact legacy Decimal update or native catalog attribute audit is missing")
 
             frappe.set_user("Administrator")
             frappe.db.delete("Has Role", {"parent": actor, "role": OP.MIGRATION_OPERATE.role})
