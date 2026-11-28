@@ -10,6 +10,8 @@ from decimal import Decimal, localcontext
 from uuid import uuid4
 
 import frappe
+
+from ..batch.authorization import is_synthetic_sku
 from frappe.utils import now_datetime
 
 from ...access import policy
@@ -72,12 +74,12 @@ def _selection(sku_id, payload):
 
 def _select_locked(sku_id, payload):
     sku = batches._load_sku(sku_id,locked=True)
-    if not sku.code.startswith('SYNTHETIC-'):
+    if not is_synthetic_sku(sku):
         policy.deny()
     def authorize(current):
         policy.require_operation(policy.Operation.COUNT,locked=True)
         _authorize(_candidate.get().company)
-        if not current.code.startswith('SYNTHETIC-'):
+        if not is_synthetic_sku(current):
             policy.deny()
     # V1-06 controlled provisioning, in this same transaction; no SKU creation.
     parsed = selection(payload)

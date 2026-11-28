@@ -72,7 +72,7 @@ V1-08 App 0.9.0。在旧版本建立合成规格和审计、SKU、Item、仓库�
 
 ### 规格层内部维护
 
-已认证的工程调用方通过 `haxpower_v1.catalog.service` 和 `catalog.dto` 创建或编辑配置及规格。使用 `save_category`、`save_attribute`、`save_option`、`save_template`，编辑时带原记录 ID。使用 `create_specification`、`edit_specification`、`get_specification` 和 `get_specification_audit` 维护规格。属性输入按属性 ID 映射到值序列，单选和多选的元素均使用选项 ID。编辑需传读到的 `expected_revision`。维护角色 `HP V1 Catalog Maintainer` 需管理员显式授予，B01 和 B02 确认后由项目组集成真实模板和业务授权。
+已认证的工程调用方通过 `haxpower_v1.catalog.service` 和 `catalog.dto` 创建或编辑配置及规格。使用 `save_category`、`save_attribute`、`save_option`、`save_template`，编辑时带原记录 ID。使用 `create_specification`、`edit_specification`、`get_specification` 和 `get_specification_audit` 维护规格。属性输入按属性 ID 映射到值序列，单选和多选的元素均使用选项 ID。编辑需传读到的 `expected_revision`。维护角色由管理员分别授予 `HP V1 Product Maintain` 和 `HP V1 Parameter Maintain`。旧维护角色的分配须人工审核。
 
 [规格层数据与值语义](../../docs/PRODUCT-MODEL.md#12-v1-02-规格层实现) · [权限和事务](../../docs/TECHNICAL-DESIGN.md#v1-02-规格维护与事务)
 
@@ -268,3 +268,11 @@ Python 追踪峰值 572 KiB。三年、192 条真实有效 SLE 的试验使用�
 受限关键词与精确属性筛选、组合 AND 查询，以及产品撤权后对技术列和技术筛选工作簿的拒绝。
 普通库存文件在无关权限变化后仍可下载。恢复演练重验保留授权和撤权后的访问。Cookie 测试也覆盖缺少字段分类的旧记录和摘要不符时的拒绝。
 V1-20 的多年生产规模、并发写入和导出性能仍须单独验收。
+
+## V1-16A 正式配置与迁移
+
+站点操作员先确认 `hp_v1_sku_settings` 包含适用的叶子 Item Group 和从原生 UOM 名称到精度的映射。首批种子数据使用已启用的整数原生 PC 和 SET，两者配置精度均为 0。通过 Bench 执行 `haxpower_v1.catalog.initial_configuration.initialize` 初始化。安装和迁移保留该步骤为显式动作。首次有分类、属性或品牌冲突时，初始化整体回滚并报告冲突记录。按批准配置初始化后可重跑，人工编辑继续保留，版本与领域 ID 记入 `HP V1 Catalog Configuration`。
+
+升级 App 0.17.0 时，每次 migrate 同步 DocType 后重验规格及其 SKU 的单位、精度和编号。发现冲突时先核对原生事实并按经批准的处置恢复一致后重试。可通过 Bench 执行 `haxpower_v1.catalog.migration.legacy_maintenance_assignments` 审核旧角色。对无 SKU 的待配置规格，可用 `haxpower_v1.catalog.service.configure_pending_specification_unit` 传规格 ID、单位和当前版本。非正式编码旧规格的新增正式 SKU 待人工核定身份处置。持续记录签发后的一致备份，恢复到旧存档前应确认其高水位覆盖已对外签发的编码。
+
+工程 CI 固定合并后的 V1-15 App 构造前版本站点并比较升级前后原生及业务快照。包含旧正式格式编号及待配置规格、历史原生流水、配置初始化、两连接分配、失败升级恢复、PC/SET 原生数量和实际 Cookie 权限回归。引入 `b03-formal-1` 后沿用候选版本原始映射。隔离夹具的显式编码由独立服务提供。

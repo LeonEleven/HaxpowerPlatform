@@ -155,3 +155,7 @@ V1-13 的库存审批由 Haxpower 服务管理。Stock Entry 和 Stock Reconcili
 ### V1-15 原生读取与下载边界
 
 ERPNext SLE、Bundle、Batch、Bin 与轻量操作日志共同用于数量验证。读侧使用一致快照与已有规则，员工 API 仅发出业务数量和领域 ID。Stock Reconciliation 的同操作、原行、同桶的原生行归并为业务净量。受控系统维护诊断提供公司范围对账；诊断不编辑原生记录。文件通过明确白名单的 V1 RPC 交付，原生 File REST、标准下载、Prepared Report、打印和导出入口继续受限。生产代理的私有目录隔离列入 G07/G09 验收。
+
+### V1-16A Item 标识及原生 UOM
+
+新 SKU 的 ERPNext Item 名称由领域 SKU ID 派生为 `HP-SKU-<sku_id>`，员工使用独立业务编码。现有 SKU 继续使用原有映射。Item 创建及受控名称更新复用绑定到该 SKU 和 Item 的原生执行作用域。现有诊断、采用和引用保护继续有效，显式采用仅供隔离工程夹具。适配层通过映射读取 Item 及 Batch 来执行数量路径，员工投影继续使用领域标识。PC、SET 的原生 UOM 必须启用并限制为整件，站点数量精度仍按执行前验证。

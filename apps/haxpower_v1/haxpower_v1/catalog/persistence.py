@@ -15,27 +15,49 @@ TEMPLATE = "HP V1 Category Attribute"
 SPECIFICATION = "HP V1 Product Specification"
 VALUE = "HP V1 Product Attribute Value"
 AUDIT = "HP V1 Attribute Edit Audit"
-MAINTAINER = "HP V1 Catalog Maintainer"
+SPEC_IDENTIFIER = "HP V1 Specification Identifier"
+NUMBER = "HP V1 Catalog Number"
+CONFIGURATION = "HP V1 Catalog Configuration"
+LEGACY_MAINTAINER = "HP V1 Catalog Maintainer"
 
-_in_write = ContextVar("hp_v1_catalog_write", default=False)
+_PARAMETER_DOCUMENTS = frozenset({CATEGORY, ATTRIBUTE, OPTION, TEMPLATE, "HP V1 Brand", CONFIGURATION})
+
+_in_write = ContextVar("hp_v1_catalog_write", default=None)
+
+
+def require_catalog_permission(*, parameters=False, inputs=False, locked=False):
+    from ..access.policy import Operation, active_actor, deny, granted_operations
+
+    if active_actor(locked=locked) == "Administrator" and getattr(frappe.local, "request", None) is None:
+        return
+    allowed = {Operation.PARAMETER_MAINTAIN if parameters else Operation.PRODUCT_MAINTAIN}
+    if inputs:
+        allowed.update((Operation.PRODUCT_MAINTAIN, Operation.PARAMETER_MAINTAIN))
+    if not granted_operations(locked=locked).intersection(allowed):
+        deny()
 
 
 def require_maintainer():
-    user = frappe.session.user
-    if user != "Administrator" and (user == "Guest" or MAINTAINER not in frappe.get_roles(user)):
-        frappe.throw("Catalog maintenance permission is required.", frappe.PermissionError)
+    require_catalog_permission()
+
+
+def require_site_operator():
+    from ..access.policy import active_actor, deny
+
+    if active_actor() != "Administrator" or getattr(frappe.local, "request", None) is not None:
+        deny()
 
 
 @contextmanager
-def catalog_write():
-    require_maintainer()
+def catalog_write(*, parameters=False):
+    require_catalog_permission(parameters=parameters, locked=True)
     # Serialize catalog writes until the caller's transaction ends. Validate against
     # current reads after obtaining the lock, including when the caller has read before.
     if not frappe.db.get_value("DocType", SPECIFICATION, for_update=True):
         frappe.throw("Catalog schema is not installed.")
     savepoint = f"catalog_{uuid4().hex}"
     frappe.db.savepoint(savepoint)
-    token = _in_write.set(True)
+    token = _in_write.set("parameters" if parameters else "products")
     try:
         yield
     except frappe.QueryDeadlockError:
@@ -52,20 +74,24 @@ def catalog_write():
 
 
 def catalog_doc(doctype, record_id):
-    return frappe.get_doc(doctype, record_id, for_update=_in_write.get())
+    return frappe.get_doc(doctype, record_id, for_update=bool(_in_write.get()))
 
 
 def catalog_rows(doctype, filters, fieldnames, *, order_by=None):
     return frappe.db.get_values(
         doctype, filters, fieldnames, as_dict=True, order_by=order_by,
-        for_update=_in_write.get(),
+        for_update=bool(_in_write.get()),
     )
 
 
 class CatalogDocument(Document):
     def validate(self):
-        if not _in_write.get():
+        scope = "parameters" if self.doctype in _PARAMETER_DOCUMENTS else "products"
+        if _in_write.get() != scope:
             frappe.throw("Use the catalog maintenance service to write this document.", frappe.PermissionError)
+
+    def before_change(self):
+        self.validate()
 
     def on_trash(self):
         frappe.throw("Catalog records cannot be deleted. Use status where available.", frappe.PermissionError)
@@ -99,9 +125,6 @@ def ensure_schema():
             rows = _index_columns(doctype, index)
         if tuple((column, int(non_unique)) for column, non_unique in rows) != tuple((field, 0) for field in fields):
             frappe.throw(f"Incorrect catalog uniqueness constraint: {index}.")
-
-    if not frappe.db.exists("Role", MAINTAINER):
-        frappe.get_doc(doctype="Role", role_name=MAINTAINER, desk_access=0).insert(ignore_permissions=True)
 
 
 def _index_columns(doctype, index):

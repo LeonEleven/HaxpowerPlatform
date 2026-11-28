@@ -1,0 +1,20 @@
+{
+ "doctype": "DocType",
+ "name": "HP V1 Catalog Number",
+ "module": "HP V1",
+ "engine": "InnoDB",
+ "field_order": [
+  "last_value"
+ ],
+ "fields": [
+  {
+   "fieldname": "last_value",
+   "label": "Last Value",
+   "fieldtype": "Data",
+   "reqd": 1,
+   "length": 100
+  }
+ ],
+ "autoname": "hash",
+ "permissions": []
+}

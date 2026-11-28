@@ -25,12 +25,12 @@ class Brand:
 
 @dataclass(frozen=True, kw_only=True)
 class SKUData:
-    code: str
+    code: str | None = None
     specification: str
     brand: str | None
     display_name: str
-    stock_uom: str
-    quantity_precision: int
+    stock_uom: str | None = None
+    quantity_precision: int | None = None
     description: str = ""
 
 

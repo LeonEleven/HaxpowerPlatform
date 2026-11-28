@@ -2,7 +2,7 @@
 
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, fields
+from dataclasses import asdict, fields, replace
 from datetime import date
 from decimal import Decimal
 import json
@@ -11,15 +11,15 @@ from uuid import uuid4
 import frappe
 from frappe.utils import get_datetime, now_datetime
 
-from . import validation as check
+from . import history, numbers, validation as check
 from .dto import (
     ACTIVE, BOOLEAN, DATA_TYPES, DATE, DECIMAL, MULTI, MULTI_SELECT, SELECT_TYPES, SINGLE, TEXT,
     AttributeData, AttributeValues, AuditEntry, CatalogRecord, CategoryData, InputValue, OptionData,
-    OptionSelection, Specification, SpecificationData, TemplateData,
+    HistoricalIdentifier, OptionSelection, Specification, SpecificationData, TemplateData,
 )
 from .persistence import (
     ATTRIBUTE, AUDIT, CATEGORY, OPTION, SPECIFICATION, TEMPLATE, VALUE,
-    catalog_doc, catalog_rows, catalog_write, require_maintainer,
+    catalog_doc, catalog_rows, catalog_write, require_catalog_permission, require_maintainer, require_site_operator,
 )
 
 
@@ -44,15 +44,17 @@ def _data(dto, record):
             value = bool(value)
         elif field.name == "description":
             value = value or ""
-        elif field.name in ("parent_category", "unit"):
+        elif field.name in ("parent_category", "unit", "stock_uom"):
             value = value or None
         values[field.name] = value
     return dto(**values)
 
 
 def _read(doctype, dto, record_id):
-    require_maintainer()
+    require_catalog_permission(inputs=True)
     record = _load(doctype, record_id)
+    if record.status != ACTIVE:
+        require_catalog_permission(parameters=True)
     return CatalogRecord(record.name, _data(dto, record))
 
 
@@ -66,7 +68,7 @@ def _metadata(data):
 
 
 def save_category(data: CategoryData, *, record_id: str | None = None) -> CatalogRecord[CategoryData]:
-    with catalog_write():
+    with catalog_write(parameters=True):
         record = _load(CATEGORY, record_id) if record_id is not None else None
         changes = _metadata(data)
         changes["sort_order"] = check.order(data.sort_order, "Sort order")
@@ -83,12 +85,19 @@ def save_category(data: CategoryData, *, record_id: str | None = None) -> Catalo
         return CatalogRecord(record.name, _data(CategoryData, record))
 
 
+def list_categories() -> tuple[CatalogRecord[CategoryData], ...]:
+    require_catalog_permission(inputs=True)
+    rows = catalog_rows(CATEGORY, {"status": ACTIVE}, ["name", *(f.name for f in fields(CategoryData))],
+                       order_by="sort_order asc, code asc")
+    return tuple(CatalogRecord(row.name, _data(CategoryData, row)) for row in rows)
+
+
 def get_category(record_id: str) -> CatalogRecord[CategoryData]:
     return _read(CATEGORY, CategoryData, record_id)
 
 
 def save_attribute(data: AttributeData, *, record_id: str | None = None) -> CatalogRecord[AttributeData]:
-    with catalog_write():
+    with catalog_write(parameters=True):
         record = _load(ATTRIBUTE, record_id) if record_id is not None else None
         changes = _metadata(data)
         data_type = check.choice(data.data_type, DATA_TYPES, "attribute data type")
@@ -108,7 +117,7 @@ def get_attribute(record_id: str) -> CatalogRecord[AttributeData]:
 
 
 def save_option(data: OptionData, *, record_id: str | None = None) -> CatalogRecord[OptionData]:
-    with catalog_write():
+    with catalog_write(parameters=True):
         record = _load(OPTION, record_id) if record_id is not None else None
         attribute = _load(ATTRIBUTE, data.attribute)
         if attribute.data_type not in SELECT_TYPES:
@@ -136,8 +145,10 @@ def get_option(record_id: str) -> CatalogRecord[OptionData]:
 
 
 def list_options(attribute_id: str, *, include_inactive: bool = False) -> tuple[CatalogRecord[OptionData], ...]:
-    require_maintainer()
+    require_catalog_permission(inputs=True)
     attribute = _load(ATTRIBUTE, attribute_id)
+    if include_inactive or attribute.status != ACTIVE:
+        require_catalog_permission(parameters=True)
     filters = {"attribute": attribute.name}
     if not include_inactive:
         filters["status"] = ACTIVE
@@ -163,7 +174,7 @@ def _has_multiple_values(category_id, attribute_id):
 
 
 def save_template(data: TemplateData, *, record_id: str | None = None) -> CatalogRecord[TemplateData]:
-    with catalog_write():
+    with catalog_write(parameters=True):
         record = _load(TEMPLATE, record_id) if record_id is not None else None
         category = _load(CATEGORY, data.category)
         attribute = _load(ATTRIBUTE, data.attribute)
@@ -188,7 +199,7 @@ def save_template(data: TemplateData, *, record_id: str | None = None) -> Catalo
 
 
 def get_category_template(category_id: str) -> tuple[CatalogRecord[TemplateData], ...]:
-    require_maintainer()
+    require_catalog_permission(inputs=True)
     category = _load(CATEGORY, category_id)
     return tuple(CatalogRecord(row.name, _data(TemplateData, row)) for row in _template_rows(category.name))
 
@@ -229,6 +240,8 @@ def _saved_values(record):
 def _specification(record):
     return Specification(
         record.name, record.revision, _data(SpecificationData, record), tuple(_saved_values(record).values()),
+        tuple(HistoricalIdentifier(source=row.source, value=history.decode(row.value))
+              for row in record.historical_identifiers),
     )
 
 
@@ -321,23 +334,92 @@ def _set_values(record, attributes):
             record.attribute_values[-1].idx = len(record.attribute_values)
 
 
+def _append_history(record, identifiers):
+    from .sku import _search_text
+
+    if not isinstance(identifiers, Sequence) or len(identifiers) > 100:
+        frappe.throw("Provide up to 100 typed specification historical identifiers.")
+    existing = {(row.source, history.decode(row.value)) for row in record.historical_identifiers}
+    for row in identifiers:
+        if not isinstance(row, HistoricalIdentifier):
+            frappe.throw("Expected a typed historical identifier.")
+        source = check.text(row.source, "Source system", 140, required=True)
+        check.text(row.value, "Historical identifier", 140, required=True)
+        key = source, row.value
+        if key not in existing:
+            if len(existing) >= 100:
+                frappe.throw("A specification supports up to 100 historical identifiers.")
+            record.append("historical_identifiers", dict(
+                source=source, value=history.encode(row.value),
+                search_text=history.encode(check.text(_search_text(row.value), "Search text", 140)),
+            ))
+            existing.add(key)
+
+
 def create_specification(
     data: SpecificationData, *, attributes: Mapping[str, Sequence[InputValue]],
+    historical_identifiers: Sequence[HistoricalIdentifier] = (),
 ) -> Specification:
+    return _create_specification(data, attributes, historical_identifiers, fixture=False)
+
+
+def create_fixture_specification(data: SpecificationData, *, attributes: Mapping[str, Sequence[InputValue]]):
+    from .fixtures import require_fixture_catalog
+
+    require_fixture_catalog()
+    return _create_specification(data, attributes, (), fixture=True)
+
+
+def _create_specification(data, attributes, historical_identifiers, *, fixture):
+    from ..adapters.erpnext import item
+
     with catalog_write():
         category = _load(CATEGORY, data.category)
         if category.status != ACTIVE:
             frappe.throw("New specifications require an active product category.")
         values = _normalize_values(category.name, attributes, {})
-        record = frappe.get_doc(doctype=SPECIFICATION, category=category.name, revision=1, **_metadata(data))
+        if fixture:
+            numbers.assert_fixture_code(data.code)
+            precision = item.configured_precision(data.stock_uom) if data.stock_uom else 0
+        else:
+            if data.code is not None:
+                frappe.throw("Specification code is assigned by the service.")
+            precision = item.configured_precision(data.stock_uom)
+            data = replace(data, code=numbers.allocate())
+        record = frappe.get_doc(
+            doctype=SPECIFICATION, category=category.name, revision=1, **_metadata(data),
+            stock_uom=data.stock_uom, quantity_precision=precision,
+        )
         _set_values(record, values)
+        _append_history(record, historical_identifiers)
         record.insert(ignore_permissions=True, set_name=uuid4().hex)
+        if not fixture:
+            numbers.reserve_through(record.name, 0)
+        return _specification(record)
+
+
+def configure_pending_specification_unit(record_id: str, stock_uom: str, *, expected_revision: int) -> Specification:
+    from ..adapters.erpnext import item
+    from .sku_persistence import SKU
+
+    require_site_operator()
+    with catalog_write():
+        record = _load(SPECIFICATION, record_id)
+        if type(expected_revision) is not int or record.revision != expected_revision:
+            frappe.throw("The specification revision has changed. Reload it before editing.")
+        if record.stock_uom or frappe.db.get_value(SKU, {"specification": record.name}, for_update=True):
+            frappe.throw("Only a pending historical specification without SKUs can be configured.")
+        record.stock_uom = stock_uom
+        record.quantity_precision = item.configured_precision(stock_uom)
+        record.revision += 1
+        record.save(ignore_permissions=True)
         return _specification(record)
 
 
 def edit_specification(
     record_id: str, data: SpecificationData, *, expected_revision: int,
     attributes: Mapping[str, Sequence[InputValue]] | None = None,
+    historical_identifiers: Sequence[HistoricalIdentifier] | None = None,
 ) -> Specification:
     with catalog_write():
         record = _load(SPECIFICATION, record_id)
@@ -346,15 +428,21 @@ def edit_specification(
         if data.category != record.category:
             frappe.throw("The category of an existing specification is immutable.")
         changes = _metadata(data)
+        if changes["code"] != record.code or (data.stock_uom or None) != (record.stock_uom or None):
+            frappe.throw("Specification code and stock UOM are immutable.")
         previous = _saved_values(record)
         current = previous if attributes is None else _normalize_values(record.category, attributes, previous)
-        if previous == current and _data(SpecificationData, record) == SpecificationData(category=record.category, **changes):
+        original = _data(SpecificationData, record)
+        unchanged = all(getattr(original, key) == value for key, value in changes.items())
+        if historical_identifiers is None and previous == current and unchanged:
             return _specification(record)
 
         record.update(changes)
         record.revision += 1
         if previous != current:
             _set_values(record, current)
+        if historical_identifiers is not None:
+            _append_history(record, historical_identifiers)
         record.save(ignore_permissions=True)
         if previous != current:
             _append_audit(record, previous, current)

@@ -8,7 +8,8 @@
   "value",
   "source",
   "notes",
-  "search_text"
+  "search_text",
+  "legacy_v1"
  ],
  "fields": [
   {
@@ -43,6 +44,13 @@
    "hidden": 1,
    "read_only": 1,
    "length": 140
+  },
+  {
+   "fieldname": "legacy_v1",
+   "label": "Historical Identifier Data (v1)",
+   "fieldtype": "Small Text",
+   "hidden": 1,
+   "read_only": 1
   }
  ],
  "istable": 1,

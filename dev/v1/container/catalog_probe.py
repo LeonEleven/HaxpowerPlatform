@@ -42,7 +42,7 @@ def seed():
     old = service.save_option(OptionData(attribute=attribute.id, option_key="OLD", display_name="Synthetic old"))
     new = service.save_option(OptionData(attribute=attribute.id, option_key="NEW", display_name="Synthetic new"))
     data = SpecificationData(code=SAMPLE_CODE, category=category.id, display_name="Synthetic migration specification")
-    original = service.create_specification(data, attributes={attribute.id: [old.id]})
+    original = getattr(service, "create_fixture_specification", service.create_specification)(data, attributes={attribute.id: [old.id]})
     service.save_option(replace(old.data, status=INACTIVE), record_id=old.id)
     saved = service.edit_specification(original.id, data, expected_revision=1, attributes={attribute.id: [new.id, old.id]})
     require(service.get_specification(saved.id) == saved and len(service.get_specification_audit(saved.id)) == 1,

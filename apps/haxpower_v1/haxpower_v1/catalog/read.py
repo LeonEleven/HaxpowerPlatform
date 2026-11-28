@@ -7,9 +7,9 @@ from decimal import Decimal
 import frappe
 
 from ..access import policy
-from . import service, validation
+from . import history, service, validation
 from .dto import ACTIVE, BOOLEAN, DATE, DECIMAL, SELECT_TYPES, TEXT
-from .persistence import ATTRIBUTE, CATEGORY, OPTION, SPECIFICATION, TEMPLATE, VALUE
+from .persistence import ATTRIBUTE, CATEGORY, OPTION, SPEC_IDENTIFIER, SPECIFICATION, TEMPLATE, VALUE
 from .sku_persistence import BRAND, SKU
 
 
@@ -50,6 +50,8 @@ def specification_rows(filters):
     values = children(VALUE, SPECIFICATION, "attribute_values",
                       "attribute data_type option_id option_key value_text value_decimal value_boolean value_date",
                       [spec.name for spec in specs])
+    historical_ids = children(SPEC_IDENTIFIER, SPECIFICATION, "historical_identifiers", "source value search_text",
+                       [spec.name for spec in specs])
     result = {}
     for spec in specs:
         path, current = {}, spec.category
@@ -80,14 +82,18 @@ def specification_rows(filters):
             ))
             attribute["values"].append(value)
         result[spec.name] = dict(label(spec), description=spec.description or "",
-                                 category_path=list(reversed(path.values())), attributes=list(attributes.values()))
+                                 category_path=list(reversed(path.values())), attributes=list(attributes.values()),
+                                 historical_identifiers=[dict(source=row.source, value=history.decode(row.value))
+                                                         for row in historical_ids[spec.name]],
+                                 historical_search=[history.decode(row.search_text)
+                                                    for row in historical_ids[spec.name]])
     return result
 
 
 def searchable_text(spec):
     from .sku import _search_text
 
-    fields = [spec["code"], spec["display_name"], spec["description"]]
+    fields = [spec["code"], spec["display_name"], spec["description"], *spec["historical_search"]]
     for category in spec["category_path"]:
         fields.extend((category["code"], category["display_name"]))
     for attribute in spec["attributes"]:
@@ -101,6 +107,8 @@ def searchable_text(spec):
 
 
 def by_ids(ids, *, details=False, include_specification=False):
+    from .sku import identifier_data
+
     if not ids:
         return {}
     include_specification = include_specification or details
@@ -112,7 +120,7 @@ def by_ids(ids, *, details=False, include_specification=False):
     skus = rows(SKU, fields, {"name": ("in", tuple(ids))})
     specs = specification_rows({"name": ("in", tuple({row.specification for row in skus}))}) if include_specification else {}
     brands = {row.name: label(row) for row in rows(BRAND, "name code display_name")}
-    identifiers = children("HP V1 Product Identifier", SKU, "identifiers", "kind value source notes", ids) if details else {}
+    identifiers = children("HP V1 Product Identifier", SKU, "identifiers", "kind value source notes search_text legacy_v1", ids) if details else {}
     aliases = children("HP V1 Product Alias", SKU, "aliases", "value language source searchable", ids) if details else {}
     result = {}
     for row in skus:
@@ -124,7 +132,7 @@ def by_ids(ids, *, details=False, include_specification=False):
         if details:
             result[row.name].update(
                 description=row.description or "",
-                identifiers=[{k: v for k, v in item.items() if k != "parent"} for item in identifiers[row.name]],
+                identifiers=[identifier_data(item) for item in identifiers[row.name]],
                 aliases=[{k: v for k, v in item.items() if k not in ("parent", "searchable")} for item in aliases[row.name]],
                 images=[], attachments=[],
             )
@@ -132,8 +140,10 @@ def by_ids(ids, *, details=False, include_specification=False):
 
 
 def public_spec(spec):
-    return dict(spec, attributes=[{k: v for k, v in attribute.items() if k != "searchable"}
-                                  for attribute in spec["attributes"]])
+    return dict(
+        {k: v for k, v in spec.items() if k != "historical_search"},
+        attributes=[{k: v for k, v in attribute.items() if k != "searchable"} for attribute in spec["attributes"]],
+    )
 
 
 def get_sku(sku_id):

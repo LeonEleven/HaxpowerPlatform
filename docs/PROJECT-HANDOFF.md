@@ -2,9 +2,13 @@
 
 ## 当前状态
 
+**2026-11-28（Asia/Shanghai）V1-16A。** PR #30 于 09:54 手动合并，实施基线为 `2794a4556bd45bada286d25d2cb9e7e365eb8f57`。V1-16A 在 `feature/v1-16a-formal-master-data` 交付 App 0.17.0，工程运行结果以任务 PR 为准。架构评审与手动合并完成后，后续工程任务为 V1-16B 主数据迁移与审核，须单独授权。正式员工库存数量 HTTP 写入保持关闭。 [PR #30](https://github.com/LeonEleven/HaxpowerPlatform/pull/30) · [V1-16A Draft PR #31](https://github.com/LeonEleven/HaxpowerPlatform/pull/31)
+
 **2026-11-27（Asia/Shanghai）核对。** V1-01 至 V1-15 已完成工程阶段验收及 ChatGPT 架构评审，PR #14–#28 均已合入 main。LeonEleven 于 15:44 手动合并 [V1-15 PR #28](https://github.com/LeonEleven/HaxpowerPlatform/pull/28)。核对时的 `origin/main` 为 [`b3cf05a06372be9e5e47653d243d250033d00f58`](https://github.com/LeonEleven/HaxpowerPlatform/commit/b3cf05a06372be9e5e47653d243d250033d00f58)，已合入的 App 版本为 0.16.0。正式员工库存数量写入 HTTP 入口继续关闭，开放须完成发布验收并取得明确授权。
 
 **2026-11-28（Asia/Shanghai）核对。** [PR #29](https://github.com/LeonEleven/HaxpowerPlatform/pull/29) 已于 2026-11-27 16:29 手动合并，远端 main 为 [`1ed9e04a96a8ead29e6a17bc71e7affb97235306`](https://github.com/LeonEleven/HaxpowerPlatform/commit/1ed9e04a96a8ead29e6a17bc71e7affb97235306)。项目负责人已批准 B01、B03 和 B10 共 33 项业务规则。下一步为架构评审本次文档 PR，由项目负责人手动合并。拆分提案经合并成为规划基线后，从 V1-16A 正式主数据规则完善开始编写任务书并取得实施授权。V1-16A/B/C 全程不改变库存数量，V1-17 专项签核后执行正式原生入账与逐桶核对。 [项目决策](DECISIONS.md#12-b01-b03-b10-正式业务规则) · [V1-16 需求及规划](V1-16-REQUIREMENTS.md) · [开发 Backlog](V1-DEVELOPMENT-BACKLOG.md#v1-16-拆分规划)
+
+**2026-11-28（Asia/Shanghai）PR #31 复审补充。** SKU LEGACY 采用版本化转义存储并保留旧记录事实，修复产品模型章节编号。复现、升级与授权检索证据见原 PR。 [PR #31 验收证据](https://github.com/LeonEleven/HaxpowerPlatform/pull/31) · [正式建档](PRODUCT-MODEL.md#16-v1-16a-正式建档)
 
 ## 项目与开发环境
 

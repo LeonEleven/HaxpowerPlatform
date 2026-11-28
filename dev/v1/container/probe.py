@@ -95,6 +95,11 @@ def snapshot():
     for doctype in ("HP V1 Export", "HP V1 Export Download"):
         if frappe.db.table_exists(doctype):
             reporting[doctype] = frappe.get_all(doctype, fields=["*"], order_by="name")
+    formal_catalog = {
+        table: frappe.get_all(table, fields=["*"], order_by="name")
+        for table in ("HP V1 Specification Identifier", "HP V1 Catalog Number", "HP V1 Catalog Configuration")
+        if frappe.db.table_exists(table)
+    }
     posted = {table: frappe.get_all(table, fields=["*"], order_by="name") for table in (
         "Stock Entry", "Stock Entry Detail", "Serial and Batch Bundle", "Serial and Batch Entry",
         "Stock Ledger Entry", "Bin", "GL Entry", "Payment Ledger Entry", "Repost Item Valuation",
@@ -103,7 +108,7 @@ def snapshot():
     return {"access": access, "approval": approval, "batch": batch, "operations": operations, "schema": schema, "rows": rows,
             "patches": logs, "catalog": catalog, "sku": sku,
             "warehouse": warehouse, "posted": posted, "inventory": inventory, "corrections": corrections,
-            "reporting": reporting}
+            "reporting": reporting, "formal_catalog": formal_catalog}
 
 
 def main(action, site):
@@ -125,6 +130,14 @@ def main(action, site):
                 ignore_permissions=True
             )
             frappe.db.commit()
+        elif action == "formal-catalog":
+            from formal_catalog_probe import run
+
+            run(site)
+        elif action in ("seed-formal-upgrade", "verify-formal-upgrade"):
+            from formal_catalog_probe import seed_upgrade, verify_upgrade
+
+            (seed_upgrade if action == "seed-formal-upgrade" else verify_upgrade)()
         elif action == "seed-catalog":
             from catalog_probe import seed
 

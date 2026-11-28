@@ -17,7 +17,8 @@ from .dto import (
     BOOLEAN, DATE, DECIMAL, INACTIVE, MULTI, MULTI_SELECT, SINGLE, SINGLE_SELECT, TEXT,
     AttributeData, CategoryData, OptionData, OptionSelection, SpecificationData, TemplateData,
 )
-from .persistence import ATTRIBUTE, AUDIT, CATEGORY, MAINTAINER, OPTION, SPECIFICATION, TEMPLATE, VALUE
+from ..access.policy import Operation
+from .persistence import ATTRIBUTE, AUDIT, CATEGORY, OPTION, SPECIFICATION, TEMPLATE, VALUE
 
 
 class TestCatalog(IntegrationTestCase):
@@ -85,7 +86,7 @@ class TestCatalog(IntegrationTestCase):
         precise = "123456789012345678901234567890.012345678901234567890123456789"
         with localcontext() as context:
             context.prec = 5
-            created = service.create_specification(self.spec, attributes={
+            created = service.create_fixture_specification(self.spec, attributes={
                 definitions[TEXT].id: ["  合成参数 <Tolerance> & ≥ 2  "],
                 definitions[DECIMAL].id: [precise + "00"],
                 definitions[BOOLEAN].id: [False],
@@ -119,16 +120,16 @@ class TestCatalog(IntegrationTestCase):
         ):
             for value in invalid:
                 with self.subTest(kind=kind, value=value), self.assertRaises(frappe.ValidationError):
-                    service.create_specification(self.spec, attributes={definitions[kind].id: [value]})
+                    service.create_fixture_specification(self.spec, attributes={definitions[kind].id: [value]})
         with self.assertRaisesRegex(frappe.ValidationError, "must be a sequence"):
-            service.create_specification(self.spec, attributes={definitions[TEXT].id: "synthetic"})
+            service.create_fixture_specification(self.spec, attributes={definitions[TEXT].id: "synthetic"})
         with self.assertRaisesRegex(frappe.ValidationError, "not assigned"):
-            service.create_specification(self.spec, attributes={uuid4().hex: ["synthetic"]})
+            service.create_fixture_specification(self.spec, attributes={uuid4().hex: ["synthetic"]})
         rule = next(item for item in service.get_category_template(self.category.id)
                     if item.data.attribute == definitions[TEXT].id)
         service.save_template(replace(rule.data, is_required=True), record_id=rule.id)
         with self.assertRaisesRegex(frappe.ValidationError, "is required"):
-            service.create_specification(self.spec, attributes={})
+            service.create_fixture_specification(self.spec, attributes={})
         self.assertFalse(frappe.db.exists(SPECIFICATION, {"code": self.spec.code}))
 
     def test_one_value_limit_cross_attribute_and_scoped_db_keys(self):
@@ -139,9 +140,9 @@ class TestCatalog(IntegrationTestCase):
         self.assertEqual(first.data.option_key, other.data.option_key)
         for values, message in (((first.id, second.id), "at most one"), ((other.id,), "does not belong")):
             with self.assertRaisesRegex(frappe.ValidationError, message):
-                service.create_specification(self.spec, attributes={single.id: values})
+                service.create_fixture_specification(self.spec, attributes={single.id: values})
         with self.assertRaisesRegex(frappe.ValidationError, "at most one"):
-            service.create_specification(self.spec, attributes={multi.id: [other.id, other_second.id]})
+            service.create_fixture_specification(self.spec, attributes={multi.id: [other.id, other_second.id]})
 
         # Probe the actual database constraint independently of the service's preflight validation.
         duplicate = frappe.get_doc(OPTION, first.id).as_dict()
@@ -168,8 +169,8 @@ class TestCatalog(IntegrationTestCase):
         self.assertEqual(service.list_options(definition.id), tuple(options))
         first, last = options[0], options[-1]
         with self.assertRaisesRegex(frappe.ValidationError, "duplicate values"):
-            service.create_specification(self.spec, attributes={definition.id: [last.id, last.id]})
-        created = service.create_specification(self.spec, attributes={definition.id: [last.id, first.id]})
+            service.create_fixture_specification(self.spec, attributes={definition.id: [last.id, last.id]})
+        created = service.create_fixture_specification(self.spec, attributes={definition.id: [last.id, first.id]})
         self.assertEqual(service.get_specification(created.id), created)
         reordered = service.edit_specification(
             created.id, self.spec, expected_revision=1, attributes={definition.id: [first.id, last.id]},
@@ -180,7 +181,7 @@ class TestCatalog(IntegrationTestCase):
     def test_inactive_options_can_only_be_retained_on_original_attribute(self):
         definition, _ = self.attribute(MULTI_SELECT, mode=MULTI)
         old, active, never_selected = (self.option(definition, index) for index in range(3))
-        original = service.create_specification(self.spec, attributes={definition.id: [old.id]})
+        original = service.create_fixture_specification(self.spec, attributes={definition.id: [old.id]})
         for option in (old, never_selected):
             service.save_option(replace(option.data, status=INACTIVE), record_id=option.id)
         self.assertEqual(service.get_specification(original.id), original)
@@ -191,7 +192,7 @@ class TestCatalog(IntegrationTestCase):
         )
         self.assertEqual(retained, original)
         with self.assertRaisesRegex(frappe.ValidationError, "is inactive"):
-            service.create_specification(replace(self.spec, code=self.spec.code + "-2"), attributes={definition.id: [old.id]})
+            service.create_fixture_specification(replace(self.spec, code=self.spec.code + "-2"), attributes={definition.id: [old.id]})
         with self.assertRaisesRegex(frappe.ValidationError, "is inactive"):
             service.edit_specification(
                 original.id, self.spec, expected_revision=1, attributes={definition.id: [old.id, never_selected.id]},
@@ -210,7 +211,7 @@ class TestCatalog(IntegrationTestCase):
     def test_definition_and_template_changes_preserve_existing_records(self):
         multi, rule = self.attribute(MULTI_SELECT, mode=MULTI)
         one, two = self.option(multi), self.option(multi, 1)
-        original = service.create_specification(self.spec, attributes={multi.id: [one.id, two.id]})
+        original = service.create_fixture_specification(self.spec, attributes={multi.id: [one.id, two.id]})
         other_category = service.save_category(CategoryData(code=f"{self.marker}-OTHER", display_name="Synthetic other"))
         other_attribute, other_rule = self.attribute(TEXT)
 
@@ -248,8 +249,8 @@ class TestCatalog(IntegrationTestCase):
         multi, _ = self.attribute(MULTI_SELECT, mode=MULTI)
         one, two = self.option(multi), self.option(multi, 1)
         before_text = "Before <Tolerance> & ≥ 2"
-        original = service.create_specification(self.spec, attributes={text.id: [before_text], multi.id: [one.id]})
-        actor = self.user(MAINTAINER)
+        original = service.create_fixture_specification(self.spec, attributes={text.id: [before_text], multi.id: [one.id]})
+        actor = self.user(Operation.PRODUCT_MAINTAIN.role)
         frappe.set_user(actor)
         earliest = now_datetime()
         updated = service.edit_specification(
@@ -280,7 +281,7 @@ class TestCatalog(IntegrationTestCase):
     def test_validation_and_audit_failure_roll_back_values_metadata_and_history(self):
         text, _ = self.attribute(TEXT)
         boolean, _ = self.attribute(BOOLEAN)
-        original = service.create_specification(self.spec, attributes={text.id: ["Before"], boolean.id: [False]})
+        original = service.create_fixture_specification(self.spec, attributes={text.id: ["Before"], boolean.id: [False]})
         existing_rows = [row.name for row in frappe.get_doc(SPECIFICATION, original.id).attribute_values]
         with self.assertRaises(frappe.ValidationError):
             service.edit_specification(
@@ -311,24 +312,24 @@ class TestCatalog(IntegrationTestCase):
     def test_identical_specs_keep_separate_ids_and_duplicate_codes_never_replace(self):
         text, _ = self.attribute(TEXT)
         values = {text.id: ["Synthetic value"]}
-        first = service.create_specification(self.spec, attributes=values)
-        second = service.create_specification(replace(self.spec, code=self.spec.code + "-2"), attributes=values)
+        first = service.create_fixture_specification(self.spec, attributes=values)
+        second = service.create_fixture_specification(replace(self.spec, code=self.spec.code + "-2"), attributes=values)
         self.assertNotEqual(first.id, second.id)
         self.assertEqual(first.attributes, second.attributes)
         with self.assertRaises(frappe.UniqueValidationError):
-            service.create_specification(self.spec, attributes={text.id: ["Different value"]})
+            service.create_fixture_specification(self.spec, attributes={text.id: ["Different value"]})
         self.assertEqual(service.get_specification(first.id), first)
 
     def test_non_maintenance_user_and_native_doc_writes_are_rejected(self):
         text, _ = self.attribute(TEXT)
-        original = service.create_specification(self.spec, attributes={text.id: ["Synthetic value"]})
+        original = service.create_fixture_specification(self.spec, attributes={text.id: ["Synthetic value"]})
         child_name = frappe.get_doc(SPECIFICATION, original.id).attribute_values[0].name
-        for user in (self.user(), self.user(MAINTAINER)):
+        for user in (self.user(), self.user(Operation.PRODUCT_MAINTAIN.role)):
             with self.subTest(user=user):
                 frappe.set_user(user)
-                if MAINTAINER not in frappe.get_roles():
+                if Operation.PRODUCT_MAINTAIN.role not in frappe.get_roles():
                     with self.assertRaises(frappe.PermissionError):
-                        service.create_specification(self.spec, attributes={})
+                        service.create_fixture_specification(self.spec, attributes={})
                     with self.assertRaises(frappe.PermissionError):
                         service.edit_specification(original.id, self.spec, expected_revision=1)
                     with self.assertRaises(frappe.PermissionError):

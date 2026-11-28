@@ -84,7 +84,9 @@ class Inventory:
             )
             if self.query.product_read:
                 spec = item["specification"]
-                row["specification"] = {key: spec[key] for key in ("id", "code", "display_name", "category_path", "attributes")}
+                row["specification"] = {key: spec[key] for key in (
+                    "id", "code", "display_name", "category_path", "attributes", "historical_identifiers",
+                )}
             result.append(row)
         valid = set(ids)
         self.included_warehouses.update(self.scope.locations[b.location_id]["warehouse_id"]

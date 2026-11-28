@@ -1,0 +1,262 @@
+{
+  "version": "b01-initial-1",
+  "attributes": [
+    {
+      "code": "ALIAS",
+      "display_name": "别名",
+      "data_type": "MULTI_SELECT"
+    },
+    {
+      "code": "PART_NUMBER",
+      "display_name": "件号",
+      "data_type": "MULTI_SELECT"
+    },
+    {
+      "code": "MODEL",
+      "display_name": "机型信息",
+      "data_type": "MULTI_SELECT"
+    },
+    {
+      "code": "COMMON_ENGRAVING",
+      "display_name": "刻印通用",
+      "data_type": "MULTI_SELECT"
+    },
+    {
+      "code": "NOZZLE_HOLES",
+      "display_name": "喷孔规格",
+      "data_type": "SINGLE_SELECT"
+    },
+    {
+      "code": "COOLING",
+      "display_name": "冷却类型",
+      "data_type": "SINGLE_SELECT"
+    },
+    {
+      "code": "COMBINATION_COUNT",
+      "display_name": "组合数量",
+      "data_type": "SINGLE_SELECT"
+    },
+    {
+      "code": "PACKAGE_SPEC",
+      "display_name": "包装规格",
+      "data_type": "SINGLE_SELECT"
+    },
+    {
+      "code": "EMISSION_STANDARD",
+      "display_name": "排放标准",
+      "data_type": "SINGLE_SELECT"
+    },
+    {
+      "code": "EMISSION_MARK",
+      "display_name": "排放标记",
+      "data_type": "SINGLE_SELECT"
+    },
+    {
+      "code": "SPEC_TYPE",
+      "display_name": "规格类型",
+      "data_type": "SINGLE_SELECT"
+    },
+    {
+      "code": "IMO_NUMBER",
+      "display_name": "IMO号码",
+      "data_type": "SINGLE_SELECT"
+    },
+    {
+      "code": "SYSTEM",
+      "display_name": "系统",
+      "data_type": "SINGLE_SELECT"
+    },
+    {
+      "code": "ENGINE_BUILDER",
+      "display_name": "造机厂",
+      "data_type": "SINGLE_SELECT"
+    },
+    {
+      "code": "FUEL_QUALITY",
+      "display_name": "燃油品质",
+      "data_type": "SINGLE_SELECT"
+    },
+    {
+      "code": "LENGTH_VARIANT",
+      "display_name": "长度区别",
+      "data_type": "SINGLE_SELECT"
+    },
+    {
+      "code": "CONSTRUCTION",
+      "display_name": "结构造型",
+      "data_type": "SINGLE_SELECT"
+    },
+    {
+      "code": "ROTATION",
+      "display_name": "旋向",
+      "data_type": "SINGLE_SELECT"
+    },
+    {
+      "code": "THREAD_TYPE",
+      "display_name": "螺纹类型",
+      "data_type": "SINGLE_SELECT"
+    },
+    {
+      "code": "CORE_DIAMETER",
+      "display_name": "芯径φ(mm)",
+      "data_type": "DECIMAL",
+      "unit": "mm"
+    },
+    {
+      "code": "SPEED",
+      "display_name": "转速(rpm)",
+      "data_type": "DECIMAL",
+      "unit": "rpm"
+    },
+    {
+      "code": "DIAMETER",
+      "display_name": "直径(mm)",
+      "data_type": "DECIMAL",
+      "unit": "mm"
+    },
+    {
+      "code": "INCLUDES_NOZZLE",
+      "display_name": "含油嘴",
+      "data_type": "BOOLEAN"
+    }
+  ],
+  "common_attributes": [
+    "ALIAS",
+    "PART_NUMBER",
+    "MODEL",
+    "COMMON_ENGRAVING"
+  ],
+  "categories": [
+    {
+      "code": "0011",
+      "display_name": "高压油泵类",
+      "attributes": [
+        "EMISSION_MARK",
+        "EMISSION_STANDARD"
+      ]
+    },
+    {
+      "code": "0013",
+      "display_name": "柱塞类",
+      "attributes": [
+        "CORE_DIAMETER",
+        "EMISSION_STANDARD",
+        "EMISSION_MARK",
+        "IMO_NUMBER",
+        "FUEL_QUALITY",
+        "SYSTEM",
+        "ROTATION"
+      ]
+    },
+    {
+      "code": "0015",
+      "display_name": "出油阀类",
+      "attributes": [
+        "IMO_NUMBER",
+        "EMISSION_STANDARD",
+        "SYSTEM",
+        "EMISSION_MARK",
+        "THREAD_TYPE"
+      ]
+    },
+    {
+      "code": "0017",
+      "display_name": "喷油嘴类",
+      "attributes": [
+        "COOLING",
+        "NOZZLE_HOLES",
+        "IMO_NUMBER",
+        "EMISSION_STANDARD",
+        "SPEED",
+        "INCLUDES_NOZZLE",
+        "SYSTEM",
+        "LENGTH_VARIANT",
+        "CONSTRUCTION",
+        "THREAD_TYPE",
+        "FUEL_QUALITY",
+        "CORE_DIAMETER"
+      ]
+    },
+    {
+      "code": "0018",
+      "display_name": "喷油器类",
+      "attributes": [
+        "COOLING",
+        "INCLUDES_NOZZLE",
+        "EMISSION_STANDARD",
+        "SYSTEM"
+      ]
+    },
+    {
+      "code": "0019",
+      "display_name": "活塞环类",
+      "attributes": [
+        "COMBINATION_COUNT",
+        "PACKAGE_SPEC",
+        "EMISSION_STANDARD",
+        "SPEC_TYPE"
+      ]
+    },
+    {
+      "code": "0021",
+      "display_name": "活塞类",
+      "attributes": [
+        "EMISSION_STANDARD",
+        "ENGINE_BUILDER",
+        "IMO_NUMBER"
+      ]
+    },
+    {
+      "code": "0023",
+      "display_name": "连杆类",
+      "attributes": []
+    },
+    {
+      "code": "0025",
+      "display_name": "轴瓦类",
+      "attributes": []
+    },
+    {
+      "code": "0027",
+      "display_name": "气阀类",
+      "attributes": []
+    },
+    {
+      "code": "0029",
+      "display_name": "螺栓类",
+      "attributes": []
+    },
+    {
+      "code": "0031",
+      "display_name": "仪表类",
+      "attributes": []
+    },
+    {
+      "code": "0032",
+      "display_name": "弹簧类",
+      "attributes": [
+        "DIAMETER"
+      ]
+    }
+  ],
+  "brands": [
+    {
+      "code": "UNBRANDED",
+      "display_name": "无品牌"
+    },
+    {
+      "code": "UNKNOWN-BRAND",
+      "display_name": "未知品牌"
+    }
+  ],
+  "units": {
+    "PC": {
+      "precision": 0,
+      "line_limit": "100000"
+    },
+    "SET": {
+      "precision": 0,
+      "line_limit": "100000"
+    }
+  }
+}

@@ -8,6 +8,8 @@ from uuid import uuid4
 
 import frappe
 
+from ..batch.authorization import is_synthetic_sku
+
 from ...access import policy
 from ...adapters.erpnext import receipt as native
 from ..batch import service as batches
@@ -66,7 +68,7 @@ def _resolve_batches(command, skus):
 
     def authorize(sku):
         _authorize(command.company)
-        if not sku.code.startswith("SYNTHETIC-"):
+        if not is_synthetic_sku(sku):
             policy.deny()
 
     resolved = {}

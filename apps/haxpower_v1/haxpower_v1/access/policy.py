@@ -16,6 +16,7 @@ SCOPE_ROW = "HP V1 Warehouse Access Row"
 class Operation(StrEnum):
     PRODUCT_READ = "Product Read"
     PRODUCT_MAINTAIN = "Product Maintain"
+    PARAMETER_MAINTAIN = "Parameter Maintain"
     WAREHOUSE_READ = "Warehouse Read"
     WAREHOUSE_MAINTAIN = "Warehouse Maintain"
     INVENTORY_READ = "Inventory Read"

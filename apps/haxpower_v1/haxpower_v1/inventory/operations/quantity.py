@@ -4,6 +4,7 @@ from decimal import Decimal
 
 import frappe
 
+from ...catalog.initial_configuration import FORMAL_UNIT_LIMITS
 from ...catalog.validation import DECIMAL_WIDTH, exact_decimal
 from .dto import QuantitySign, StockError
 
@@ -35,6 +36,6 @@ def quantity_text(value, uom, *, sku, sign: QuantitySign, limits):
         raise StockError("STOCK_QUANTITY_SIGN")
     if (limit := _decimal(limits.get(uom), "STOCK_QUANTITY_LIMIT_UNCONFIGURED")) <= 0:
         raise StockError("STOCK_QUANTITY_LIMIT_UNCONFIGURED")
-    if number.copy_abs() > limit:
+    if number.copy_abs() > min(limit, FORMAL_UNIT_LIMITS.get(uom, limit)):
         raise StockError("STOCK_QUANTITY_LIMIT")
     return text
