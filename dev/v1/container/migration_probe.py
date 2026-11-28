@@ -312,6 +312,11 @@ def run(site):
             legal = {**full, formats.LEGACY_SPEC: spec_rows}
             for sheet in (formats.LEGACY_ATTR, formats.LEGACY_SKU):
                 legal[sheet] = [row for row in full[sheet] if row["material_spec_id"] in spec_keys]
+            for row in legal[formats.LEGACY_ATTR]:
+                if formats.ATTRIBUTES[row["prop_name"]]["data_type"].endswith("_SELECT"):
+                    row["prop_value"] += " " + tag
+            for row in legal[formats.LEGACY_SKU]:
+                row["factory_brand"] += " " + tag
             legacy_ok = _approved(formats.LEGACY, tag, book(legal, formats.LEGACY))
             _drain(legacy_ok)
             require(service.preview(legacy_ok["task"])["state"] == "Completed",

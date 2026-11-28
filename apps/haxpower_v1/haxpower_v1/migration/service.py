@@ -50,7 +50,10 @@ def _valid_id(value):
 def _save_file(task_id, source, name, content, pending, *, purpose="source", identity=None):
     identity = identity or uuid4().hex
     pending.append(identity)
-    size, digest = private_files.store(identity, lambda stream: stream.write(content), area=AREA)
+    try:
+        size, digest = private_files.store(identity, lambda stream: stream.write(content), area=AREA)
+    except OSError:
+        raise xlsx.MigrationError("MIGRATION_FILE_STORAGE") from None
     store.insert(store.FILE, identity, task_id=task_id, source_version=source, original_name=store.pack(name),
                  sha256=digest, byte_count=size, purpose=purpose)
     return {"id": identity, "name": name, "sha256": digest, "size": size}
@@ -74,7 +77,10 @@ def _remove_uncommitted(pending):
         # After a connection failure at commit, preserve any committed evidence.
         with connection(read_committed=True):
             if not frappe.db.get_value(store.FILE, identity, "name"):
-                private_files.filename(identity, area=AREA).unlink(missing_ok=True)
+                try:
+                    private_files.filename(identity, area=AREA).unlink(missing_ok=True)
+                except OSError:
+                    raise xlsx.MigrationError("MIGRATION_FILE_CLEANUP") from None
 
 
 def _read_uploads(uploads):
@@ -545,8 +551,11 @@ def template(path):
     if getattr(frappe.local, "request", None) is not None:
         policy.deny()
     _authorize(OP.MIGRATION_OPERATE)
-    with Path(path).open("xb") as stream:
-        formats.template(stream)
+    try:
+        with Path(path).open("xb") as stream:
+            formats.template(stream)
+    except OSError:
+        raise xlsx.MigrationError("MIGRATION_TEMPLATE_OUTPUT") from None
 
 
 def upload_paths(source, dataset, paths, *, task_id=None, expected_version=None):
@@ -557,7 +566,10 @@ def upload_paths(source, dataset, paths, *, task_id=None, expected_version=None)
     if not isinstance(paths, list) or not 1 <= len(paths) <= xlsx.MAX_FILES:
         raise xlsx.MigrationError("WORKBOOK_COUNT")
     uploads = []
-    for path in map(Path, paths):
-        with path.open("rb") as stream:
-            uploads.append((path.name, stream.read(xlsx.MAX_FILE + 1)))
+    try:
+        for path in map(Path, paths):
+            with path.open("rb") as stream:
+                uploads.append((path.name, stream.read(xlsx.MAX_FILE + 1)))
+    except OSError:
+        raise xlsx.MigrationError("MIGRATION_SOURCE_READ") from None
     return upload(source, dataset, uploads, task_id=task_id, expected_version=expected_version)

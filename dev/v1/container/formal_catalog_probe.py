@@ -160,8 +160,9 @@ def _ensure_native_units():
             frappe.rename_doc("UOM", temporary, unit, force=True)
         if native:
             doc = frappe.get_doc("UOM", unit)
-            doc.update(enabled=1, must_be_whole_number=1)
-            doc.save()
+            if not (doc.enabled and doc.must_be_whole_number):
+                doc.update({"enabled": 1, "must_be_whole_number": 1})
+                doc.save()
         else:
             make_uom(unit, whole=True)
 
