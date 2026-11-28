@@ -174,7 +174,16 @@ def run(site):
             frappe.set_user(actor)
             keys = {group["kind"]: group["key"] for group in view["groups"]}
             execute = lambda kind: service.execute(task["task"], task["version"], group=keys[kind])[0]
-            execute("Categories")
+            original_apply = service._apply
+            attempts = iter([True, False])
+
+            def retry_once(*args):
+                if next(attempts):
+                    raise frappe.QueryDeadlockError("Synthetic retry")
+                return original_apply(*args)
+
+            with patch.object(service, "_apply", side_effect=retry_once):
+                require(execute("Categories")["state"] == "Completed", "group did not retry a deadlock")
             frappe.set_user(executor)
             denied(frappe.PermissionError, lambda: execute("Brands"))
             frappe.set_user(parameter)

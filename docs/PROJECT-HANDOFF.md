@@ -1,8 +1,8 @@
 # HaxpowerPlatform 项目交接
 
-**2026-11-28（Asia/Shanghai）V1-16B 实施基线。** V1-16A PR #31 于 17:23:42 由项目负责人合并，`origin/main` 为 `f3b43cf522b86fe22dfd4b0012c39005396d36ff`。最终复审提交为 `c059b31dbae5e41df5e10324760e1ba13e89d93b`，App 0.17.0。P1-01 修复 SKU LEGACY 原文被默认清理的问题，采用可逆存储并兼容既有记录。P2-01 修正产品模型章节编号及引用。最终工程 CI 46107165107 已通过。V1-16B App 0.18.0 的工作簿、主数据审核与受控导入见迁移契约，工程证据见任务 Draft PR。V1-16C 后续须另行授权。 [PR #31](https://github.com/LeonEleven/HaxpowerPlatform/pull/31) · [V1-16A 最终 CI](https://github.com/LeonEleven/HaxpowerPlatform/actions/runs/46107165107) · [V1-16B Draft PR #32](https://github.com/LeonEleven/HaxpowerPlatform/pull/32) · [V1-16B 契约](V1-16B-MASTER-DATA-MIGRATION.md)
-
 ## 当前状态
+
+**2026-11-28（Asia/Shanghai）V1-16B 实施基线。** V1-16A PR #31 于 17:23:42 由项目负责人合并，`origin/main` 为 `f3b43cf522b86fe22dfd4b0012c39005396d36ff`。最终复审提交为 `c059b31dbae5e41df5e10324760e1ba13e89d93b`，App 0.17.0。P1-01 修复 SKU LEGACY 原文被默认清理的问题，采用可逆存储并兼容既有记录。P2-01 修正产品模型章节编号及引用。最终工程 CI 46107165107 已通过。V1-16B App 0.18.0 的工作簿、主数据审核与受控导入见迁移契约，工程证据见任务 Draft PR。V1-16C 后续须另行授权。 [PR #31](https://github.com/LeonEleven/HaxpowerPlatform/pull/31) · [V1-16A 最终 CI](https://github.com/LeonEleven/HaxpowerPlatform/actions/runs/46107165107) · [V1-16B Draft PR #32](https://github.com/LeonEleven/HaxpowerPlatform/pull/32) · [V1-16B 契约](V1-16B-MASTER-DATA-MIGRATION.md)
 
 **2026-11-28（Asia/Shanghai）V1-16A。** PR #30 于 09:54 手动合并，实施基线为 `2794a4556bd45bada286d25d2cb9e7e365eb8f57`。V1-16A 在 `feature/v1-16a-formal-master-data` 交付 App 0.17.0，工程运行结果以任务 PR 为准。架构评审与手动合并完成后，后续工程任务为 V1-16B 主数据迁移与审核，须单独授权。正式员工库存数量 HTTP 写入保持关闭。 [PR #30](https://github.com/LeonEleven/HaxpowerPlatform/pull/30) · [V1-16A Draft PR #31](https://github.com/LeonEleven/HaxpowerPlatform/pull/31)
 

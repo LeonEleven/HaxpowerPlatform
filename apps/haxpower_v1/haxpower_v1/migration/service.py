@@ -2,6 +2,7 @@
 
 from dataclasses import asdict
 from pathlib import Path
+from time import sleep
 from uuid import uuid4
 
 import frappe
@@ -16,6 +17,7 @@ from . import catalog, formats, plan, store, xlsx
 OP = policy.Operation
 AREA = private_files.Area.MIGRATION
 MAX_GROUP_BATCH = 25
+DEADLOCK_RETRIES = 3
 MAX_PAGE = 100
 
 
@@ -521,7 +523,16 @@ def execute(task_id, version, *, group=None, max_groups=1):
     seen = set()
     results = []
     for _ in range(max_groups):
-        result = _execute(task_id, version, group, seen)
+        for attempt in range(DEADLOCK_RETRIES + 1):
+            try:
+                result = _execute(task_id, version, group, seen)
+                break
+            except frappe.QueryDeadlockError:
+                if attempt == DEADLOCK_RETRIES:
+                    raise xlsx.MigrationError("MIGRATION_DATABASE_BUSY") from None
+                # A deadlock ends the transaction. Reopen it with current
+                # authorization and the same approved plan before retrying.
+                sleep(0.05 * 2 ** attempt)
         results.append(result)
         if "group" not in result or result["state"] == "Invalidated":
             break
