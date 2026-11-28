@@ -312,7 +312,9 @@ class TestSKU(IntegrationTestCase):
         managed.end_of_life = str(managed.end_of_life)
         managed.description = "Synthetic non-identity maintenance"
         managed.save()
-        unmanaged = self.native_item(code=f"{native_name}-UNMANAGED")
+        with self.assertRaisesRegex(frappe.PermissionError, "identity is reserved"):
+            self.native_item(code=f"{native_name}-UNMANAGED")
+        unmanaged = self.native_item(code=f"{self.code}-UNMANAGED")
         unmanaged.item_name = "Unmanaged native maintenance"
         unmanaged.save()
         self.assertEqual(sku.diagnose_item_mapping(unmanaged.name).status, "Unmanaged")
