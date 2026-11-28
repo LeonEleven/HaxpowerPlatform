@@ -43,7 +43,7 @@ def workbook(sheets, *, extra=None):
             data.append(f'<row r="{row}">' + "".join(cells) + "</row>")
         parts["xl/" + path] = f'<worksheet xmlns="{main}"><sheetData>' + "".join(data) + "</sheetData></worksheet>"
     parts["xl/workbook.xml"] = (f'<workbook xmlns="{main}" xmlns:r="{rel}"><sheets>'
-                                + "".join(sheet_links) + "</sheets></workbook>")
+                                + "".join(sheet_links) + "</sheets><workbookProtection/><definedNames/></workbook>")
     parts["xl/_rels/workbook.xml.rels"] = (f'<Relationships xmlns="{package}">'
                                            + "".join(workbook_links) + "</Relationships>")
     parts.update(extra or {})

@@ -257,7 +257,10 @@ def run(site):
             legacy_task = service.upload(formats.LEGACY, "errors-" + tag, [("old.xlsx", raw)])
             require(legacy_task["blocked"] > 0, "legacy anomalies failed to block approval")
             legacy_preview = service.preview(legacy_task["task"], limit=100)
-            issues = {issue for group in legacy_preview["groups"] for issue in group["issues"]}
+            legacy_groups = list(legacy_preview["groups"])
+            for offset in range(100, legacy_preview["total"], 100):
+                legacy_groups.extend(service.preview(legacy_task["task"], offset=offset, limit=100)["groups"])
+            issues = {issue for group in legacy_groups for issue in group["issues"]}
             require({"DUPLICATE_OR_INVALID_LEGACY_ID", "EXPLICIT_BRAND_REQUIRED", "MISSING_SPECIFICATION",
                      "DUPLICATE_ATTRIBUTE_VALUE", "MISSING_OPTIONAL_TECHNICAL_VALUES", "SINGLE_VALUE_CONFLICT"} <= issues,
                     f"legacy anomaly evidence incomplete: {issues}")

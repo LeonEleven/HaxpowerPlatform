@@ -26,7 +26,7 @@ PART = re.compile(
 )
 COORDINATE = re.compile(r"([A-Z]{1,2})([1-9][0-9]{0,4})")
 PASSIVE = {
-    "workbook": {"fileVersion", "workbookPr", "bookViews", "sheets", "calcPr"},
+    "workbook": {"fileVersion", "workbookPr", "bookViews", "sheets", "calcPr", "workbookProtection", "definedNames"},
     "worksheet": {"sheetPr", "dimension", "sheetViews", "sheetFormatPr", "cols", "sheetData",
                   "pageMargins", "pageSetup", "printOptions", "autoFilter"},
 }
@@ -199,6 +199,9 @@ def read(name, payload):
         book = members["xl/workbook.xml"]
         _require(book.tag == _tag("workbook") and all(child.tag in {_tag(k) for k in PASSIVE["workbook"]}
                                                       for child in book), "WORKBOOK_ACTIVE_CONTENT")
+        for tag in ("workbookProtection", "definedNames"):
+            _require(all(not list(node) and not node.attrib and not (node.text or "").strip()
+                         for node in book.findall(_tag(tag))), "WORKBOOK_ACTIVE_CONTENT")
         sheets = book.find(_tag("sheets"))
         _require(sheets is not None and 1 <= len(sheets) <= 10, "WORKBOOK_SHEET_LIMIT")
         shared = []
