@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-**2026-11-28（Asia/Shanghai）V1-16A。** PR #30 于 09:54 手动合并，实施基线为 `2794a4556bd45bada286d25d2cb9e7e365eb8f57`。V1-16A 在 `feature/v1-16a-formal-master-data` 交付 App 0.17.0，工程运行结果以任务 PR 为准。架构评审与手动合并完成后，后续工程任务为 V1-16B 主数据迁移与审核，须单独授权。正式员工库存数量 HTTP 写入保持关闭。 [PR #30](https://github.com/LeonEleven/HaxpowerPlatform/pull/30) · [V1-16A 分支比较](https://github.com/LeonEleven/HaxpowerPlatform/compare/main...feature/v1-16a-formal-master-data)
+**2026-11-28（Asia/Shanghai）V1-16A。** PR #30 于 09:54 手动合并，实施基线为 `2794a4556bd45bada286d25d2cb9e7e365eb8f57`。V1-16A 在 `feature/v1-16a-formal-master-data` 交付 App 0.17.0，工程运行结果以任务 PR 为准。架构评审与手动合并完成后，后续工程任务为 V1-16B 主数据迁移与审核，须单独授权。正式员工库存数量 HTTP 写入保持关闭。 [PR #30](https://github.com/LeonEleven/HaxpowerPlatform/pull/30) · [V1-16A Draft PR #31](https://github.com/LeonEleven/HaxpowerPlatform/pull/31)
 
 **2026-11-27（Asia/Shanghai）核对。** V1-01 至 V1-15 已完成工程阶段验收及 ChatGPT 架构评审，PR #14–#28 均已合入 main。LeonEleven 于 15:44 手动合并 [V1-15 PR #28](https://github.com/LeonEleven/HaxpowerPlatform/pull/28)。核对时的 `origin/main` 为 [`b3cf05a06372be9e5e47653d243d250033d00f58`](https://github.com/LeonEleven/HaxpowerPlatform/commit/b3cf05a06372be9e5e47653d243d250033d00f58)，已合入的 App 版本为 0.16.0。正式员工库存数量写入 HTTP 入口继续关闭，开放须完成发布验收并取得明确授权。
 

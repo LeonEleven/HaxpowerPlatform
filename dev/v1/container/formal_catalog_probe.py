@@ -13,6 +13,7 @@ from identity import require
 
 UPGRADE_CODE = "P999999"
 PENDING_CODE = "P999998"
+LEGACY_READER = "v1-legacy-catalog-reader@example.invalid"
 
 
 def seed_upgrade():
@@ -42,7 +43,20 @@ def seed_upgrade():
         send_welcome_email=0, roles=[{"role": "HP V1 Catalog Maintainer"}],
     ).insert(ignore_permissions=True)
     require(actor.name == "v1-legacy-catalog@example.invalid", "historical role fixture missing")
+    from haxpower_v1.access.policy import Operation
+    from haxpower_v1.reporting import exports
+
+    frappe.get_doc(
+        doctype="User", email=LEGACY_READER, first_name="Synthetic legacy workbook reader",
+        send_welcome_email=0, roles=[{"role": Operation.PRODUCT_READ.role}, {"role": Operation.EXPORT.role}],
+    ).insert(ignore_permissions=True)
     frappe.db.commit()
+    frappe.set_user(LEGACY_READER)
+    try:
+        workbook = exports.generate("products", {"sku_code": UPGRADE_CODE + "-999"})
+        require(workbook["status"] == "Ready" and workbook["rows"] == 1, "V1-15 workbook fixture did not generate")
+    finally:
+        frappe.set_user("Administrator")
 
 
 def denied(exception, operation, message=""):
@@ -61,6 +75,25 @@ def verify_upgrade():
     from haxpower_v1.catalog.persistence import SPECIFICATION
     from haxpower_v1.catalog.sku_dto import SKUData
     from haxpower_v1.catalog.sku_persistence import SKU
+    from haxpower_v1.access.policy import Operation
+    from haxpower_v1.reporting import exports
+
+    original_file = frappe.db.get_value(exports.EXPORT, {"requested_by": LEGACY_READER})
+    require(original_file, "V1-15 workbook metadata was not preserved")
+    frappe.set_user(LEGACY_READER)
+    try:
+        require(exports.download(original_file)[1].startswith(b"PK"),
+                "V1-15 workbook was unreadable after V1-16A upgrade")
+    finally:
+        frappe.set_user("Administrator")
+    frappe.db.delete("Has Role", {"parent": LEGACY_READER, "role": Operation.PRODUCT_READ.role})
+    frappe.db.commit()
+    frappe.set_user(LEGACY_READER)
+    try:
+        denied(frappe.PermissionError, lambda: exports.status(original_file))
+        denied(frappe.PermissionError, lambda: exports.download(original_file))
+    finally:
+        frappe.set_user("Administrator")
 
     existing = frappe.get_doc(SKU, frappe.db.get_value(SKU, {"code": UPGRADE_CODE + "-999"}))
     pending = service.get_specification(frappe.db.get_value(SPECIFICATION, {"code": PENDING_CODE}))

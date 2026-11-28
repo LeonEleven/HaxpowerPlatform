@@ -401,8 +401,37 @@ def verify_product_permissions(fixture, request, client, stock_reader, product_r
         frappe.db.set_value(exports.EXPORT, plain_id, "sha256", checksum, update_modified=False)
         frappe.db.commit()
 
+    if formal:
+        verify_formal_native_flow(product.id)
+
     print("V1-15 Cookie HTTP field isolation, AND search, workbook provenance, revocation and integrity passed.",
           flush=True)
+
+
+def verify_formal_native_flow(sku_id):
+    from haxpower_v1.inventory.issue import service as issues
+    from correction_probe import Fixture as CorrectionFixture
+    from transfer_followup_probe import payload
+
+    fixture = CorrectionFixture()
+    fixture.sku = sku_id
+    fixture.toggle(False)
+    with fixture.operate():
+        receipt = receipts.submit(fixture.receipt_command("5.125"))
+    correction = fixture.check(fixture.submit(receipt, ("0.125",)))
+    require(correction.operation_id, "the independent native Item missed its correction history")
+    with fixture.operate():
+        issue = issues.submit(fixture.issue_command("0.375"))
+        command = fixture.transfer_command("1.25")
+        ready = transfers.submit(command)
+        sent = transfers.dispatch(replace(command, draft=replace(command.draft, revision=ready.revision)))
+        dispatched = transfers.get_dispatch(fixture.company, sent.transfer_id)
+        received = transfers.receive(payload(dispatched, (0, "0.5")))
+        frappe.clear_cache()
+        counted = finish(fixture.count_task(difference=Decimal("0.125")))
+        require(issue.operation_id and received.operation_id and counted.operation_id,
+                "formal SKU did not complete issue, partial transfer and native count")
+    print("Formal SKU independent Item passed fractional receipt, correction, issue, transfer and counting.", flush=True)
 
 
 def verify_snapshot(site, fixture, reader):

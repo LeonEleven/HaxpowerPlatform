@@ -333,20 +333,25 @@ def _set_values(record, attributes):
             record.attribute_values[-1].idx = len(record.attribute_values)
 
 
-def _set_history(record, identifiers):
+def _append_history(record, identifiers):
     from .sku import _search_text
 
     if not isinstance(identifiers, Sequence) or len(identifiers) > 100:
         frappe.throw("Provide up to 100 typed specification historical identifiers.")
-    record.set("historical_identifiers", [])
+    existing = {(row.source, row.value) for row in record.historical_identifiers}
     for row in identifiers:
         if not isinstance(row, HistoricalIdentifier):
             frappe.throw("Expected a typed historical identifier.")
         source = check.text(row.source, "Source system", 140, required=True)
         check.text(row.value, "Historical identifier", 140, required=True)
-        record.append("historical_identifiers", dict(
-            source=source, value=row.value, search_text=check.text(_search_text(row.value), "Search text", 140),
-        ))
+        key = source, row.value
+        if key not in existing:
+            if len(existing) >= 100:
+                frappe.throw("A specification supports up to 100 historical identifiers.")
+            record.append("historical_identifiers", dict(
+                source=source, value=row.value, search_text=check.text(_search_text(row.value), "Search text", 140),
+            ))
+            existing.add(key)
 
 
 def create_specification(
@@ -384,7 +389,7 @@ def _create_specification(data, attributes, historical_identifiers, *, fixture):
             stock_uom=data.stock_uom, quantity_precision=precision,
         )
         _set_values(record, values)
-        _set_history(record, historical_identifiers)
+        _append_history(record, historical_identifiers)
         record.insert(ignore_permissions=True, set_name=uuid4().hex)
         if not fixture:
             numbers.reserve_through(record.name, 0)
@@ -435,13 +440,7 @@ def edit_specification(
         if previous != current:
             _set_values(record, current)
         if historical_identifiers is not None:
-            previous_history = tuple(HistoricalIdentifier(source=row.source, value=row.value)
-                                     for row in record.historical_identifiers)
-            _set_history(record, historical_identifiers)
-            retained = {HistoricalIdentifier(source=row.source, value=row.value)
-                        for row in record.historical_identifiers}
-            if not retained.issuperset(previous_history):
-                frappe.throw("Existing historical specification identifiers must be retained.")
+            _append_history(record, historical_identifiers)
         record.save(ignore_permissions=True)
         if previous != current:
             _append_audit(record, previous, current)
