@@ -371,9 +371,8 @@ def _guard(group, results):
             raise catalog.Blocked("STALE_UNIT_CONFIGURATION") from None
         if current != group["unit"][1]:
             raise catalog.Blocked("STALE_UNIT_CONFIGURATION")
-    if (category := group.get("template_category")) or group["template_groups"]:
-        if not category:
-            category = _resolve(group["projected"]["category"], results)
+    if (category := group.get("template_category")) is not None:
+        category = _resolve(category, results)
         expected = dict(group.get("template_guard", {}))
         expected.update({results[key]["target"]: results[key]["target_digest"] for key in group["template_groups"]})
         if catalog.template(category) != expected:
@@ -420,7 +419,12 @@ def _apply(task, version, group, results, approved):
         payload["values"] = values
     if "history" in group["payload"]:
         payload["history"] = group["payload"]["history"]
-    target = catalog.apply(group, catalog.merge(kind, payload, group["before"]))
+    try:
+        target = catalog.apply(group, catalog.merge(kind, payload, group["before"]))
+    except (frappe.QueryDeadlockError, frappe.PermissionError):
+        raise
+    except frappe.ValidationError:
+        raise catalog.Blocked("CATALOG_WRITE_REJECTED") from None
     state = catalog.snapshot(kind, target)
     if group["action"] in {"create", "update"}:
         for field, expected in payload.items():
@@ -434,7 +438,12 @@ def _apply(task, version, group, results, approved):
                     raise catalog.Blocked("CATALOG_PERSISTENCE_DIFFERENCE")
             elif state.get(field) != expected:
                 raise catalog.Blocked("CATALOG_PERSISTENCE_DIFFERENCE")
-    _write_mapping(task.source_version, group, target, state, version, approved)
+    try:
+        _write_mapping(task.source_version, group, target, state, version, approved)
+    except (catalog.Blocked, frappe.QueryDeadlockError, frappe.PermissionError):
+        raise
+    except Exception:
+        raise catalog.Blocked("SOURCE_MAPPING_WRITE_FAILED") from None
     return {"target": target, "target_digest": formats.digest(state)}
 
 

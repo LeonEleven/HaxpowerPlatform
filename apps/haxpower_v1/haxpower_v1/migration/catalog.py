@@ -175,7 +175,7 @@ def normalize(kind, supplied, current, *, create):
 def apply(group, payload):
     kind, identity = group["kind"], group["target"]
     action = group["action"]
-    if action in {"reference", "unchanged", "match"}:
+    if action in {"reference", "unchanged"}:
         return identity
     if kind in SAVERS:
         data = DTOS[kind](**{key: payload[key] for key in payload})

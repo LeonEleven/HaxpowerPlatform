@@ -131,14 +131,15 @@ class Preview:
         return target, state
 
     def _rules(self, group, category):
+        group["template_category"] = category
         if isinstance(category, str):
-            group["template_category"] = category
             base = catalog.template_rules(category)
             group["template_guard"] = catalog.template(category)
             rules = {row.attribute: asdict(row) for row in base}
             for row in base:
                 if row.is_required:
-                    self.reference(group, "Attributes", "id:" + row.attribute)
+                    _, definition = self.reference(group, "Attributes", "id:" + row.attribute)
+                    rules[row.attribute]["is_required"] = definition["status"] == ACTIVE
         else:
             rules = {}
         for dep in tuple(self.groups.values()):
@@ -292,9 +293,12 @@ class Preview:
 
         fields = {key: value for key, value in entry["fields"].items() if key not in formats.DERIVED_FIELDS}
         related = {}
-        for key in formats.REFERENCE.keys() & fields.keys():
-            if fields[key] is not None:
+        referenced_fields = formats.REFERENCE.keys() & (fields.keys() | current.keys())
+        for key in sorted(referenced_fields):
+            if fields.get(key) is not None:
                 fields[key], related[key] = self.reference(result, formats.REFERENCE[key], fields[key])
+            elif current.get(key):
+                _, related[key] = self.reference(result, formats.REFERENCE[key], "id:" + current[key])
         if any(record.get("status", ACTIVE) != ACTIVE for record in related.values()):
             raise Blocked("INACTIVE_DEPENDENCY")
 
@@ -333,8 +337,6 @@ class Preview:
             spec = related.get("specification")
             if not spec:
                 _, spec = self.reference(result, "Specifications", "id:" + projected["specification"])
-            if not related.get("brand"):
-                self.reference(result, "Brands", "id:" + projected["brand"])
             uom = spec.get("stock_uom")
             result["unit"] = [uom, catalog.unit(uom)]
             precision = result["unit"][1]["precision"]

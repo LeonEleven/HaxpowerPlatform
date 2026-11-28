@@ -100,6 +100,26 @@ def _standard(code, source, brand_code, *, name="Synthetic migration rotor", act
     }
 
 
+def _custom_template(source, tag):
+    heading = "Distinct synthetic template"
+    return {
+        "Instructions": [{"version": source}],
+        "Categories": [{"key": "C", "action": "create", "code": f"CLASS-{tag}", "display_name": heading}],
+        "Attributes": [{"key": "A", "action": "create", "code": f"ATTR-{tag}", "display_name": heading,
+                        "data_type": "MULTI_SELECT"}],
+        "Options": [
+            {"key": key, "action": "create", "attribute": "A", "option_key": key, "display_name": key}
+            for key in ("0001", "0002")
+        ],
+        "Templates": [{"key": "T", "action": "create", "category": "C", "attribute": "A",
+                       "is_required": True, "value_mode": "MULTI", "searchable": True}],
+        "Specifications": [{"key": "S", "action": "create", "category": "C", "stock_uom": "SET",
+                            "display_name": heading}],
+        "Specification Values": [{"key": key, "specification": "S", "attribute": "A", "option": key}
+                                 for key in ("0001", "0002")],
+    }
+
+
 def run(site):
     from haxpower_v1.access.policy import Operation as OP
     from haxpower_v1.adapters.erpnext import item
@@ -229,6 +249,16 @@ def run(site):
             require("IMMUTABLE_TARGET_IDENTITY" in _group(bad, "Specifications", "001")["issues"],
                     "immutable unit change was not blocked")
             require(sku.get_sku(imported["target"]).data.stock_uom == "PC", "existing SKU changed units")
+
+            custom = _approved(source, "custom-" + tag, book(_custom_template(source, tag), source))
+            _drain(custom)
+            custom_group = _group(custom, "Specifications", "S")
+            custom_result = service.execute(custom["task"], custom["version"], group=custom_group["key"])[0]
+            frappe.db.rollback()
+            custom_spec = products.get_specification(custom_result["target"])
+            require(custom_spec.data.stock_uom == "SET" and
+                    [option.key for option in custom_spec.attributes[0].values] == ["0001", "0002"],
+                    "new category template, option keys or stock unit drifted during import")
 
             brands = _standard("Distinct brand identities", source, f"UNUSED-{tag}", sku=False)
             brands["Brands"] = [
