@@ -10,7 +10,10 @@
   "description",
   "status",
   "revision",
-  "attribute_values"
+  "attribute_values",
+  "stock_uom",
+  "quantity_precision",
+  "historical_identifiers"
  ],
  "fields": [
   {
@@ -64,6 +67,26 @@
    "label": "Attribute Values",
    "fieldtype": "Table",
    "options": "HP V1 Product Attribute Value"
+  },
+  {
+   "fieldname": "stock_uom",
+   "label": "Stock UOM",
+   "fieldtype": "Link",
+   "options": "UOM",
+   "read_only": 1
+  },
+  {
+   "fieldname": "quantity_precision",
+   "label": "Quantity Precision",
+   "fieldtype": "Int",
+   "non_negative": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "historical_identifiers",
+   "label": "Historical Identifiers",
+   "fieldtype": "Table",
+   "options": "HP V1 Specification Identifier"
   }
  ],
  "allow_rename": 0,

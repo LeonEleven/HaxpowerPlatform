@@ -10,12 +10,12 @@ from ...catalog.dto import ACTIVE
 from ...catalog.sku_persistence import SKU
 from ...catalog.validation import IDENTIFIER
 from ..guard import lock_stock_writes
-from .authorization import require_batch_operator, require_candidate_writer
+from .authorization import POLICY_SETTING, require_batch_operator, require_candidate_writer
 from .dto import (
     Batch, BatchError, BatchInput, BatchKind, BatchResolution, BatchSelection,
     MappingStatus, Normalization, NormalizationStatus,
 )
-from .normalization import CANDIDATE_VERSION, normalize_selection, selection_key
+from .normalization import CANDIDATE_VERSION, FORMAL_VERSION, normalize_selection, selection_key
 from .persistence import batch_write, mappings, validated_identity
 
 
@@ -49,7 +49,8 @@ def _preview(selection, rows):
     if any(validated_identity(row) is None for row in rows):
         raise BatchError("BATCH_MAPPING_UNAVAILABLE")
     preview = selection.normalization
-    if preview and any(row.original_text != preview.original for row in rows):
+    if (preview and (preview.policy_version == CANDIDATE_VERSION or preview.status != NormalizationStatus.EXACT)
+            and any(row.original_text != preview.original for row in rows)):
         preview = replace(preview, status=NormalizationStatus.COLLISION)
     return replace(selection, normalization=preview)
 
@@ -69,9 +70,14 @@ def _confirmed_preview(selection, rows, confirmation):
     return preview
 
 
+def _operator_selection(selection):
+    version = CANDIDATE_VERSION if frappe.conf.get(POLICY_SETTING) == CANDIDATE_VERSION else FORMAL_VERSION
+    return normalize_selection(selection, policy_version=version)
+
+
 def preview_selection(sku_id: str, selection: BatchInput | None) -> BatchSelection:
     require_batch_operator()
-    parsed = normalize_selection(selection)
+    parsed = _operator_selection(selection)
     sku = _load_sku(sku_id, locked=False)
     return _preview(parsed, _matching_rows(sku, parsed, locked=False))
 
@@ -87,7 +93,7 @@ def resolve_existing(
 ) -> BatchResolution:
     """Resolve a selection without creating a previously absent stock bucket."""
     require_batch_operator()
-    parsed = normalize_selection(selection)
+    parsed = _operator_selection(selection)
     sku = _load_sku(sku_id, locked=False)
     return _resolve_existing(sku, parsed, locked=False, confirmation=confirmation)
 
@@ -104,14 +110,17 @@ def resolve_or_create(
     sku_id: str, selection: BatchInput | None, *, confirmation: Normalization | None = None,
 ) -> BatchResolution:
     require_batch_operator()
-    parsed = normalize_selection(selection)
+    parsed = _operator_selection(selection)
     try:
         with batch_write():
             lock_stock_writes()
             # A current read under the SKU row lock serializes the first and
             # all subsequent selections, even if the caller has an old snapshot.
             sku = _load_sku(sku_id, locked=True)
-            return _resolve_locked(sku, parsed, require_candidate_writer, confirmation=confirmation)
+            return _resolve_locked(
+                sku, parsed, require_candidate_writer, confirmation=confirmation,
+                no_batch_version=frappe.conf.get(POLICY_SETTING),
+            )
     except BatchError:
         raise
     except (frappe.QueryDeadlockError, frappe.QueryTimeoutError):
@@ -121,7 +130,7 @@ def resolve_or_create(
         raise BatchError("BATCH_PERSISTENCE_FAILED") from None
 
 
-def _resolve_locked(sku, parsed, authorize, *, confirmation=None):
+def _resolve_locked(sku, parsed, authorize, *, confirmation=None, no_batch_version=FORMAL_VERSION):
     """Resolve under the shared stock guard in the caller's transaction."""
     authorize(sku)
     rows = _matching_rows(sku, parsed, locked=True)
@@ -136,7 +145,8 @@ def _resolve_locked(sku, parsed, authorize, *, confirmation=None):
     native.assert_native_ownership(sku, prior)
     batch_id = uuid4().hex
     item._enable_batch(sku, batch_id, authorize=authorize)
-    row = native.create_mapping(sku, batch_id, parsed, CANDIDATE_VERSION, authorize=authorize)
+    version = parsed.normalization.policy_version if parsed.normalization else no_batch_version
+    row = native.create_mapping(sku, batch_id, parsed, version, authorize=authorize)
     return BatchResolution(_verified_batch(row, sku, locked=True), preview, created=True)
 
 

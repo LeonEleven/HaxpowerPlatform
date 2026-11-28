@@ -566,7 +566,8 @@ def run(site):
 
 def whole_unit_sku(first):
     from haxpower_v1.adapters.erpnext import item
-    from haxpower_v1.catalog import sku
+    from haxpower_v1.catalog import service as catalog, sku
+    from haxpower_v1.catalog.dto import SpecificationData
     from haxpower_v1.catalog.sku_dto import BrandData, SKUData
     from haxpower_v1.catalog.test_sku import make_uom
 
@@ -576,8 +577,15 @@ def whole_unit_sku(first):
     unit = make_uom(PIECES, whole=True)
     frappe.conf[item.SETTINGS] = {"item_group": reference.native_item_group, "uom_precision": {unit: 0}}
     brand = sku.save_brand(BrandData(code=PIECES, display_name="Synthetic Receipt PC"))
-    result = sku.create_sku(SKUData(code=PIECES, specification=reference.specification, brand=brand.id,
-                                   display_name="Synthetic Receipt Whole Item", stock_uom=unit, quantity_precision=0))
+    category = catalog.get_specification(reference.specification).data.category
+    spec = getattr(catalog, "create_fixture_specification", catalog.create_specification)(
+        SpecificationData(code=PIECES, category=category, display_name="Synthetic Receipt Whole Specification"),
+        attributes={},
+    )
+    result = getattr(sku, "create_fixture_sku", sku.create_sku)(SKUData(
+        code=PIECES, specification=spec.id, brand=brand.id,
+        display_name="Synthetic Receipt Whole Item", stock_uom=unit, quantity_precision=0,
+    ))
     frappe.db.commit()
     return result.id
 

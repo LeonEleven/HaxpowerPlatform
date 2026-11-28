@@ -1,0 +1,20 @@
+{
+ "doctype": "DocType",
+ "name": "HP V1 Catalog Configuration",
+ "module": "HP V1",
+ "engine": "InnoDB",
+ "autoname": "hash",
+ "fields": [
+  {
+   "fieldname": "record_ids",
+   "label": "Initial Record IDs",
+   "fieldtype": "Long Text",
+   "reqd": 1,
+   "read_only": 1
+  }
+ ],
+ "field_order": [
+  "record_ids"
+ ],
+ "permissions": []
+}

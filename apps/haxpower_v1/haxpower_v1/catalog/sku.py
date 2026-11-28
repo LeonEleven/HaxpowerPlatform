@@ -1,16 +1,19 @@
 """Internal, permission-checked Brand and SKU operations."""
 
 from collections.abc import Sequence
+from dataclasses import replace
 from unicodedata import normalize
 from uuid import uuid4
 
 import frappe
 
 from ..adapters.erpnext import item
-from . import service as catalog
+from . import numbers, service as catalog
 from . import validation as check
 from .dto import ACTIVE, INACTIVE
-from .persistence import catalog_doc, catalog_write, require_maintainer
+from .persistence import (
+    catalog_doc, catalog_rows, catalog_write, require_catalog_permission, require_maintainer, require_site_operator,
+)
 from .sku_dto import Alias, Brand, BrandData, Identifier, ItemMappingDiagnostic, SKUData, StockItem
 from .sku_persistence import BRAND, SKU
 
@@ -41,7 +44,7 @@ def _brand(doc):
 
 
 def save_brand(data: BrandData, *, record_id: str | None = None) -> Brand:
-    with catalog_write():
+    with catalog_write(parameters=True):
         changes = _metadata(data.code, data.display_name, data.description)
         status = check.status(data.status)
         if record_id is None:
@@ -60,9 +63,16 @@ def save_brand(data: BrandData, *, record_id: str | None = None) -> Brand:
         return _brand(doc)
 
 
+def list_brands() -> tuple[Brand, ...]:
+    require_catalog_permission(inputs=True)
+    rows = catalog_rows(BRAND, {"status": ACTIVE}, ["name", "code", "display_name", "description", "status"],
+                       order_by="code asc")
+    return tuple(_brand(row) for row in rows)
+
+
 def get_brand(record_id: str) -> Brand:
-    require_maintainer()
-    return _brand(_load(BRAND, record_id))
+    record = catalog._read(BRAND, BrandData, record_id)
+    return Brand(record.id, record.data)
 
 
 def _sku_fields(data):
@@ -81,9 +91,13 @@ def _attachment_rows(doc, *, identifiers, aliases):
             continue
         if not isinstance(values, Sequence) or len(values) > 100 or any(not isinstance(v, dto) for v in values):
             frappe.throw(f"Provide up to 100 typed {table} per SKU.")
+        previous = {(row.value, row.source or "") for row in doc.get(table) or ()
+                    if table == "identifiers" and row.kind == "LEGACY"}
         doc.set(table, [])
         for row in values:
             value = check.text(row.value, "Identifier or alias", 140, required=True)
+            if table == "identifiers" and row.kind == "LEGACY":
+                value = row.value
             fields = dict(value=value, search_text=check.text(_search_text(value), "Search text", 140),
                           source=check.text(row.source, "Source", 140))
             if table == "identifiers":
@@ -93,6 +107,9 @@ def _attachment_rows(doc, *, identifiers, aliases):
                 fields.update(language=check.text(row.language, "Alias language", 35),
                               searchable=check.boolean(row.searchable, "Alias searchable"))
             doc.append(table, fields)
+        if previous and not previous.issubset((row.value, row.source or "") for row in doc.identifiers
+                                              if row.kind == "LEGACY"):
+            frappe.throw("Existing historical SKU identifiers must be retained.")
 
 
 def _stock_item(doc, *, locked=False):
@@ -116,11 +133,40 @@ def _stock_item(doc, *, locked=False):
 
 def create_sku(
     data: SKUData, *, identifiers: Sequence[Identifier] = (), aliases: Sequence[Alias] = (),
+) -> StockItem:
+    return _create_sku(data, identifiers, aliases, fixture=False, existing_item=None)
+
+
+def create_fixture_sku(
+    data: SKUData, *, identifiers: Sequence[Identifier] = (), aliases: Sequence[Alias] = (),
     existing_item: str | None = None,
 ) -> StockItem:
+    from .fixtures import require_fixture_catalog
+
+    require_fixture_catalog()
+    return _create_sku(data, identifiers, aliases, fixture=True, existing_item=existing_item)
+
+
+def _create_sku(data, identifiers, aliases, *, fixture, existing_item):
     with catalog_write():
+        spec = catalog.get_specification(data.specification)
+        if fixture:
+            numbers.assert_fixture_code(data.code)
+        else:
+            if data.code is not None:
+                frappe.throw("SKU code is assigned by the service.")
+            if not spec.data.stock_uom:
+                frappe.throw("The historical specification has a pending stock UOM configuration.")
+            precision = item.configured_precision(spec.data.stock_uom)
+            if frappe.db.get_value(catalog.SPECIFICATION, spec.id, "quantity_precision",
+                                   for_update=True) != precision:
+                frappe.throw("Configured precision differs from the specification's frozen precision.")
+            if (data.stock_uom is not None and data.stock_uom != spec.data.stock_uom
+                    or data.quantity_precision is not None and (
+                        type(data.quantity_precision) is not int or data.quantity_precision != precision)):
+                frappe.throw("SKU must use its specification's stock UOM and quantity precision.")
+            data = replace(data, stock_uom=spec.data.stock_uom, quantity_precision=precision, code=numbers.allocate(spec))
         fields = _sku_fields(data)
-        spec = catalog.get_specification(fields["specification"])
         brand = _load(BRAND, fields["brand"])
         if spec.data.status != ACTIVE or catalog.get_category(spec.data.category).data.status != ACTIVE:
             frappe.throw("SKU creation requires an active specification and category.")
@@ -129,10 +175,21 @@ def create_sku(
         if frappe.db.get_value(SKU, {"code": fields["code"]}, for_update=True):
             frappe.throw("This SKU code already exists.", frappe.UniqueValidationError)
         group = item.validate_configuration(fields["stock_uom"], fields["quantity_precision"])
-        native_name = fields["code"] if existing_item is None else check.text(
-            existing_item, "ERPNext Item name", 140, required=True,
-        )
+        if fixture:
+            expected = (fields["stock_uom"], fields["quantity_precision"])
+            stored = frappe.db.get_value(catalog.SPECIFICATION, spec.id, ("stock_uom", "quantity_precision"),
+                                         for_update=True)
+            if stored[0] and tuple(stored) != expected:
+                frappe.throw("SKU must use its specification's stock UOM and quantity precision.")
+            if not stored[0]:
+                frappe.db.set_value(catalog.SPECIFICATION, spec.id,
+                                    dict(zip(("stock_uom", "quantity_precision"), expected)), update_modified=False)
         sku_id = uuid4().hex
+        native_name = f"{item.INTERNAL_PREFIX}{sku_id}"
+        if fixture:
+            native_name = fields["code"] if existing_item is None else check.text(
+                existing_item, "ERPNext Item name", 140, required=True,
+            )
         doc = frappe.get_doc(
             doctype=SKU, name=sku_id, status=ACTIVE, revision=1, native_item=native_name,
             native_item_group=group, **fields,
@@ -187,9 +244,7 @@ def deactivate_sku(record_id: str) -> StockItem:
 
 
 def diagnose_item_mapping(item_name: str) -> ItemMappingDiagnostic:
-    require_maintainer()
-    if frappe.session.user != "Administrator":
-        frappe.throw("Site administration permission is required for native Item diagnostics.", frappe.PermissionError)
+    require_site_operator()
     name = check.text(item_name, "ERPNext Item name", 140, required=True)
     return item.mapping_for_item(name)
 
@@ -259,7 +314,7 @@ def search_sku_ids(query, *, limit=None, offset=0, include_inactive=False, categ
         end = offset + limit if limit is not None else None
         return names[offset:end], len(names)
 
-    spec_search = {}
+    spec_search, exact_specs = {}, ()
     if tokens or category or attributes:
         specs = read.specification_rows({"status": ACTIVE} if not include_inactive else {})
         if category or attributes:
@@ -269,6 +324,8 @@ def search_sku_ids(query, *, limit=None, offset=0, include_inactive=False, categ
             condition("sku.specification IN %s", tuple(specs))
         if tokens:
             spec_search = {key: read.searchable_text(spec) for key, spec in specs.items()}
+            exact_specs = tuple(key for key, spec in specs.items()
+                                if normalized in (_search_text(spec["code"]), *spec["historical_search"]))
     for token in tokens:
         matched = tuple(key for key, searchable in spec_search.items() if token in searchable)
         conditions.append(
@@ -292,8 +349,9 @@ def search_sku_ids(query, *, limit=None, offset=0, include_inactive=False, categ
         sort = """ORDER BY (BINARY LOWER(sku.code) = BINARY %s) DESC,
         EXISTS (SELECT 1 FROM `tabHP V1 Product Identifier` exact_id
                 WHERE exact_id.parent=sku.name AND exact_id.parenttype=%s AND exact_id.parentfield='identifiers'
-                AND BINARY exact_id.search_text=BINARY %s) DESC, sku.code, sku.name"""
-        sort_params = (normalized, SKU, normalized)
+                AND BINARY exact_id.search_text=BINARY %s) DESC,
+        (sku.specification IN %s) DESC, sku.code, sku.name"""
+        sort_params = (normalized, SKU, normalized, exact_specs or ("",))
     page = " LIMIT %s OFFSET %s" if limit is not None else ""
     names = frappe.db.sql(f"SELECT sku.name {source} {sort}{page}",
                           (*params, *sort_params, *((limit, offset) if page else ())))

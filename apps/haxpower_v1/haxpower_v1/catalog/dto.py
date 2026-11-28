@@ -64,7 +64,8 @@ class TemplateData:
 
 @dataclass(frozen=True, kw_only=True)
 class SpecificationData:
-    code: str
+    code: str | None = None
+    stock_uom: str | None = None
     display_name: str
     category: str
     description: str = ""
@@ -99,12 +100,19 @@ class AttributeValues:
     values: tuple[Value, ...]
 
 
+@dataclass(frozen=True, kw_only=True)
+class HistoricalIdentifier:
+    source: str
+    value: str
+
+
 @dataclass(frozen=True)
 class Specification:
     id: str
     revision: int
     data: SpecificationData
     attributes: tuple[AttributeValues, ...]
+    historical_identifiers: tuple[HistoricalIdentifier, ...] = ()
 
 
 @dataclass(frozen=True)

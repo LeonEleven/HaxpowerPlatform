@@ -5,6 +5,8 @@ from decimal import Decimal
 
 import frappe
 
+from .batch.authorization import is_synthetic_sku
+
 from ..access import policy
 from ..adapters.erpnext import batch as native_batch, stock_entry as stock
 from .batch.dto import BatchError, MappingStatus
@@ -29,7 +31,7 @@ class Availability:
 
 
 def resolve_existing(sku, parsed):
-    if not sku.code.startswith("SYNTHETIC-"):
+    if not is_synthetic_sku(sku):
         policy.deny()
     try:
         batch = _resolve_existing(sku, parsed, locked=True).batch

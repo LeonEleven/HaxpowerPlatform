@@ -246,22 +246,38 @@ def verify_product_permissions(fixture, request, client, stock_reader, product_r
     category = service.save_category(CategoryData(code=code, display_name=f"CATEGORY-{prefix}"))
     attribute = service.save_attribute(AttributeData(code=code, display_name="Synthetic field", data_type=TEXT))
     service.save_template(TemplateData(category=category.id, attribute=attribute.id, searchable=True))
-    spec = service.create_specification(
-        SpecificationData(code=code, category=category.id, display_name=f"SPEC-{prefix}"),
-        attributes={attribute.id: [term]},
-    )
     base = frappe.db.get_value(SKU, fixture.sku, ("brand", "native_item_group", "stock_uom", "quantity_precision"),
                                as_dict=True)
+    formal = hasattr(service, "create_fixture_specification")
+    legacy_spec, legacy_sku = f"OLDSPEC-{prefix}", f"OLDSKU-{prefix}"
     with patch.dict(frappe.conf, {item.SETTINGS: {
         "item_group": base.native_item_group, "uom_precision": {base.stock_uom: base.quantity_precision},
     }}):
+        if formal:
+            from haxpower_v1.catalog.dto import HistoricalIdentifier
+
+            spec = service.create_specification(
+                SpecificationData(stock_uom=base.stock_uom, category=category.id, display_name=f"SPEC-{prefix}"),
+                attributes={attribute.id: [term]},
+                historical_identifiers=[HistoricalIdentifier(source="Synthetic", value=legacy_spec)],
+            )
+            identifiers = [Identifier(kind="LEGACY", value=legacy_sku, source="Synthetic")]
+            sku_fields = {}
+        else:
+            spec = service.create_specification(
+                SpecificationData(code=code, category=category.id, display_name=f"SPEC-{prefix}"),
+                attributes={attribute.id: [term]},
+            )
+            identifiers = []
+            sku_fields = {"code": code}
         product = sku.create_sku(
-            SKUData(code=code, specification=spec.id, brand=base.brand, display_name="合成可读",
+            SKUData(specification=spec.id, brand=base.brand, display_name="合成可读",
                     description=f"DESCRIPTION-{prefix}", stock_uom=base.stock_uom,
-                    quantity_precision=base.quantity_precision),
-            identifiers=[Identifier(kind="OEM", value=f"IDENTIFIER-{prefix}")],
+                    quantity_precision=base.quantity_precision, **sku_fields),
+            identifiers=[Identifier(kind="OEM", value=f"IDENTIFIER-{prefix}"), *identifiers],
             aliases=[Alias(value=f"ALIAS-{prefix}")],
         )
+    native_id = frappe.db.get_value(SKU, product.id, "native_item")
     dual_identity = synthetic_user(prefix, "read-combined", Operation.INVENTORY_READ,
                                    Operation.PRODUCT_READ, Operation.EXPORT)
     set_scope(dual_identity[0], fixture.company, Mode.SELECTED, [fixture.warehouses[0]])
@@ -289,6 +305,13 @@ def verify_product_permissions(fixture, request, client, stock_reader, product_r
     directory = result(request, product_reader, "access.api.get_sku", params={"sku_id": product.id})
     require(term in json.dumps(directory) and not ({"physical", "available", "in_transit"} & directory.keys()),
             "product-only detail lost technical fields or exposed inventory")
+    if formal:
+        require(native_id != product.data.code and native_id not in json.dumps(directory)
+                and legacy_spec in json.dumps(directory) and legacy_sku in json.dumps(directory),
+                "employee product DTO lost historical identifiers or leaked native Item identity")
+        for query in (spec.data.code, legacy_spec, legacy_sku, product.data.code, f"合成可读 {term} {legacy_spec}"):
+            found = result(request, product_reader, "access.api.search_products", params={"criteria": json.dumps({"query": query})})
+            require(any(row["id"] == product.id for row in found["rows"]), "formal or historical search lost a match")
     report(product_reader, "stock", criteria, expected=403)
     request(stock_reader, "access.api.product_filters", expected=403)
     detail = result(request, stock_reader, "inventory.read.api.document", params={"document_id": receipt.document_id})
@@ -299,8 +322,11 @@ def verify_product_permissions(fixture, request, client, stock_reader, product_r
     basic_row, = basic["rows"]
     require(basic["total"] == 1 and Decimal(basic_row["physical"]) == 2 and "specification" not in basic_row,
             "basic keyword search lost quantity or returned technical fields")
-    for secret in (term, f"SPEC-{prefix}", f"CATEGORY-{prefix}", f"DESCRIPTION-{prefix}",
-                   f"IDENTIFIER-{prefix}", f"ALIAS-{prefix}"):
+    secrets = (term, f"SPEC-{prefix}", f"CATEGORY-{prefix}", f"DESCRIPTION-{prefix}",
+               f"IDENTIFIER-{prefix}", f"ALIAS-{prefix}")
+    if formal:
+        secrets += (legacy_spec, legacy_sku, native_id)
+    for secret in secrets:
         require(report(stock_reader, "stock", {**criteria, "query": secret})["total"] == 0,
                 "stock-only keyword matched a restricted catalog field")
 
@@ -313,7 +339,7 @@ def verify_product_permissions(fixture, request, client, stock_reader, product_r
     report(stock_reader, "stock", {**criteria, "category": category.id}, expected=403)
     request(stock_reader, "reporting.api.generate", body={"report": "stock", "criteria": exact}, expected=403)
 
-    combined = {**exact, "query": f"合成可读　{term.lower()}"}
+    combined = {**exact, "query": f"合成可读　{term.lower()}" + (f" {legacy_spec}" if formal else "")}
     full = report(dual, "stock", combined)
     full_row, = full["rows"]
     require(full["total"] == 1 and term in json.dumps(full_row["specification"]),
@@ -331,6 +357,10 @@ def verify_product_permissions(fixture, request, client, stock_reader, product_r
     require("specification" in full_sheet[0] and term in str(full_sheet[1])
             and "specification" not in basic_sheet[0] and term not in str(basic_sheet[1]),
             "Excel field visibility differs from the corresponding employee page")
+    if formal:
+        require(legacy_spec in str(full_sheet[1]) and native_id not in str(full_sheet)
+                and native_id not in str(basic_sheet) and "HP-NB-" not in str(full_sheet),
+                "formal workbook lost authorized history or exposed internal Item or Batch")
     manifest = json.loads(frappe.db.get_value(exports.EXPORT, report_id, "columns_json"))
     coverage = json.loads(frappe.db.get_value(exports.EXPORT, filtered_id, "columns_json"))
     require(manifest["columns"] == list(full_sheet[0]) and manifest["product_columns"] == ["specification"]
@@ -515,7 +545,7 @@ def measure_native_history(site):
     with patch.dict(frappe.conf, {item.SETTINGS: {
         "item_group": base.native_item_group, "uom_precision": {base.stock_uom: base.quantity_precision},
     }}):
-        fixture.sku = sku.create_sku(SKUData(code=code, specification=base.specification, brand=base.brand,
+        fixture.sku = getattr(sku, "create_fixture_sku", sku.create_sku)(SKUData(code=code, specification=base.specification, brand=base.brand,
                                              display_name="Synthetic native report history", stock_uom=base.stock_uom,
                                              quantity_precision=base.quantity_precision)).id
     year = frappe.utils.getdate().year

@@ -17,6 +17,7 @@ ITEM = "Item"
 SKU_MARKER = "custom_hp_v1_sku_id"
 SKU_MARKER_PERMLEVEL = 2  # ERPNext Item Manager has native access through level 1.
 SETTINGS = "hp_v1_sku_settings"
+INTERNAL_PREFIX = "HP-SKU-"
 
 # Protect fields that identify the item and determine its use in inventory.
 FLAGS = {
@@ -84,15 +85,27 @@ def _uom_supports(uom, precision):
     )
 
 
-def validate_configuration(uom_name: str, precision: int) -> str:
-    settings = _settings()
-    configured = settings["uom_precision"].get(uom_name)
-    if type(precision) is not int or type(configured) is not int or precision != configured:
+def configured_precision(uom_name: str) -> int:
+    from ...catalog.initial_configuration import FORMAL_UNITS
+
+    if uom_name != check.text(uom_name, "Stock UOM", 140, required=True):
+        frappe.throw("Stock UOM must be supplied by its exact name.")
+    configured = _settings()["uom_precision"].get(uom_name)
+    if type(configured) is not int:
         frappe.throw("SKU quantity precision must match the configured precision of its stock UOM.")
     uom = frappe.db.get_value("UOM", uom_name, ("name", "enabled", "must_be_whole_number"),
                               as_dict=True, for_update=True)
-    if not _uom_supports(uom, precision) or uom.name != uom_name:
+    if not _uom_supports(uom, configured) or uom.name != uom_name:
         frappe.throw("The stock UOM is missing, disabled, or incompatible with the quantity precision.")
+    if uom_name in FORMAL_UNITS and (configured != 0 or not uom.must_be_whole_number):
+        frappe.throw("PC and SET require an enabled whole-number UOM and precision zero.")
+    return configured
+
+
+def validate_configuration(uom_name: str, precision: int) -> str:
+    if type(precision) is not int or configured_precision(uom_name) != precision:
+        frappe.throw("SKU quantity precision must match the configured precision of its stock UOM.")
+    settings = _settings()
 
     name = check.text(settings.get("item_group"), "Configured Item Group", 140, required=True)
     group = frappe.db.get_value("Item Group", name, ("name", "is_group"), as_dict=True, for_update=True)
@@ -303,6 +316,9 @@ def guard_item_change(doc, method=None):
     existing = not doc.is_new()
     if marker and allows_native_write(ITEM_SERVICE, name, marker, existing=existing):
         return
+    if not existing and any((candidate or "").upper().startswith(INTERNAL_PREFIX)
+                            for candidate in (name, doc.item_code)):
+        frappe.throw("ERPNext Item identity is reserved for the SKU service.", frappe.PermissionError)
     if marker or (existing and managed_item(name, locked=True)):
         previous = doc.get_doc_before_save()
         batch_id = doc.flags.get("hp_v1_enable_batch_id")
@@ -326,6 +342,8 @@ class ItemLifecycle:
         super().on_trash()
 
     def before_rename(self, old, new, merge=False):
+        if new.upper().startswith(INTERNAL_PREFIX):
+            frappe.throw("ERPNext Item identity is reserved for the SKU service.", frappe.PermissionError)
         if any(managed_item(name, locked=True) for name in sorted({old, new})):
             frappe.throw("A managed ERPNext Item cannot be renamed or merged.", frappe.PermissionError)
         super().before_rename(old, new, merge=merge)

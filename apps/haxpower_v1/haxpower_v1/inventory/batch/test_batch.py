@@ -44,15 +44,15 @@ class TestBatch(IntegrationTestCase):
             item.SETTINGS: {"item_group": group, "uom_precision": {uom: 3}},
         }))
         category = catalog.save_category(CategoryData(code=code, display_name="Synthetic category"))
-        spec = catalog.create_specification(
+        spec = catalog.create_fixture_specification(
             SpecificationData(code=code, category=category.id, display_name="Synthetic specification"),
             attributes={},
         )
         brand = sku.save_brand(BrandData(code=code, display_name="Synthetic brand"))
         data = SKUData(code=code, specification=spec.id, brand=brand.id,
                        display_name="Synthetic SKU", stock_uom=uom, quantity_precision=3)
-        self.first = sku.create_sku(data)
-        self.second = sku.create_sku(replace(data, code=f"{code}-2"))
+        self.first = sku.create_fixture_sku(data)
+        self.second = sku.create_fixture_sku(replace(data, code=f"{code}-2"))
         self.native_items = (self.first.data.code, self.second.data.code)
 
     def stock_tables(self):

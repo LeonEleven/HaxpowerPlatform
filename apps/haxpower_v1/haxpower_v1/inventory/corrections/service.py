@@ -10,6 +10,8 @@ from uuid import uuid4
 
 import frappe
 
+from ..batch.authorization import is_synthetic_sku
+
 from ...access import policy
 from ...adapters.erpnext import issue, receipt
 from ...approval import SUBMISSION
@@ -319,7 +321,7 @@ def _post(plan):
     if execution != (domain_command, frappe.session.user):
         raise StockError("CORRECTION_SPECIALIST_APPROVAL_REQUIRED")
     require_native_precision(plan.skus.values(), "CORRECTION_NATIVE_PRECISION_UNCONFIGURED")
-    if any(not sku.code.startswith("SYNTHETIC-") for sku in plan.skus.values()):
+    if any(not is_synthetic_sku(sku) for sku in plan.skus.values()):
         policy.deny()
     links = []
     for direction in ("source", "target"):

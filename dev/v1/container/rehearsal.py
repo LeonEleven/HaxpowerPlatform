@@ -135,12 +135,31 @@ def verify_approval_install(state):
             "migration inferred historical approval facts")
 
 
-def verify_reporting_upgrade(state, baseline, *, failed=False):
-    require(dict(state, reporting=baseline["reporting"]) == baseline,
-            "V1-15 migration changed pre-existing native quantity, domain histories or grants")
-    if not failed:
-        require(state["reporting"] == {"HP V1 Export": [], "HP V1 Export Download": []},
-                "export audit schema is missing or migration inferred a historical export")
+def verify_master_data_upgrade(state, baseline, *, failed=False):
+    current_spec = state["catalog"]["HP V1 Product Specification"]
+    old_spec = baseline["catalog"]["HP V1 Product Specification"]
+    old_units = {}
+    for row in baseline["sku"]["tables"]["HP V1 Stock Item"]["rows"]:
+        old_units[row["specification"]] = row["stock_uom"], row["quantity_precision"]
+    expected_specs = []
+    for row in old_spec["rows"]:
+        unit, precision = old_units.get(row["name"], (None, 0)) if not failed else (None, 0)
+        expected_specs.append(dict(row, stock_uom=unit, quantity_precision=precision))
+    require(current_spec["rows"] == expected_specs, "unexpected historical specification unit or identity after upgrade")
+    roles = state["access"]["roles"]
+    added = [role for role in roles if role["name"] == "HP V1 Parameter Maintain"]
+    require(len(added) == (0 if failed else 1), "unexpected parameter role migration state")
+    comparable_access = dict(state["access"], roles=[role for role in roles if role not in added])
+    comparable_catalog = dict(state["catalog"], **{"HP V1 Product Specification": old_spec})
+    require(dict(state, access=comparable_access, catalog=comparable_catalog,
+                 formal_catalog=baseline["formal_catalog"]) == baseline,
+            "V1-16A migration changed native stock, other domain histories or assigned grants")
+    require(set(state["formal_catalog"]) == {"HP V1 Specification Identifier", "HP V1 Catalog Number",
+                                            "HP V1 Catalog Configuration"}, "formal catalog schema missing")
+    require(not state["formal_catalog"]["HP V1 Specification Identifier"]
+            and not state["formal_catalog"]["HP V1 Catalog Configuration"], "migration seeded unrequested data")
+    require(bool(state["formal_catalog"]["HP V1 Catalog Number"]) != failed,
+            "unexpected formal number initialization state")
 
 
 def recovery_point(backup):
@@ -209,7 +228,7 @@ def integration():
     verify_catalog_schema(clean)
     verify_sku_schema(clean)
     verify_warehouse_schema(clean)
-    verify_access_schema(clean)
+    verify_access_schema(clean, role_count=14)
     verify_batch_schema(clean)
     verify_stock_schema(clean)
     verify_approval_install(clean)
@@ -225,6 +244,7 @@ def integration():
     inspect("stock-count-native", SITE)
     inspect("approval", SITE)
     inspect("stock-correction", SITE)
+    inspect("formal-catalog", SITE)
     inspect("inventory-reporting", SITE)
     inspect("inventory-history-scale", SITE)
     clean_with_stock = inspect("snapshot", SITE)
@@ -259,7 +279,7 @@ def rehearse_upgrade(clean):
             baseline = Path(path) / "apps/haxpower_v1"
             deploy_app(fixture=baseline)
             version = run(PYTHON, "-c", "import haxpower_v1; print(haxpower_v1.__version__)", capture=True)
-            require(version.strip() == "0.15.0", "expected the merged V1-14 app")
+            require(version.strip() == "0.16.0", "expected the merged V1-15 app")
             site_command("migrate", target=UPGRADE)
             baseline_empty = inspect("snapshot", UPGRADE)
             verify_upgraded(baseline_empty, previous)
@@ -280,7 +300,7 @@ def rehearse_upgrade(clean):
                     and len(seeded["warehouse"]["native_leaves"]) == 9
                     and len(seeded["access"]["assignments"]) == 2
                     and len(seeded["batch"]["rows"]) == len(seeded["batch"]["native"]) == 5,
-                    "unexpected merged V1-14 synthetic state")
+                    "unexpected merged V1-15 synthetic state")
             inspect("sku-concurrency", UPGRADE)
             inspect("stock-execution", UPGRADE)
             inspect("receipt-execution", UPGRADE)
@@ -293,10 +313,11 @@ def rehearse_upgrade(clean):
             inspect("correction-recovery-prepare", UPGRADE)
             # Ordinary approval recovery requires the final recorded switch to be on.
             inspect("approval-recovery-prepare", UPGRADE)
+            inspect("seed-formal-upgrade", UPGRADE)
             baseline_state = inspect("snapshot", UPGRADE)
-            record("merged V1-14 with native movements, counts, approvals and corrections", baseline_state)
+            record("merged V1-15 with native movements, counts, approvals and corrections", baseline_state)
             def failed_upgrade(state):
-                verify_reporting_upgrade(state, baseline_state, failed=True)
+                verify_master_data_upgrade(state, baseline_state, failed=True)
             rehearse_failure(baseline, baseline_state, failed_upgrade)
         finally:
             deploy_app()
@@ -308,8 +329,9 @@ def run_upgraded_rehearsal(clean, baseline_state):
     check_bench()
     site_command("migrate", target=UPGRADE)
     upgraded = inspect("snapshot", UPGRADE)
-    verify_reporting_upgrade(upgraded, baseline_state)
-    record("V1-15 upgraded from merged V1-14; quantities, versions, approvals and corrections preserved", upgraded)
+    verify_master_data_upgrade(upgraded, baseline_state)
+    inspect("verify-formal-upgrade", UPGRADE)
+    record("V1-16A upgraded from merged V1-15; native inventory and domain histories preserved", upgraded)
     verify_upgraded_workflows(clean)
 
 

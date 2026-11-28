@@ -7,6 +7,7 @@ from unicodedata import category, normalize
 from .dto import BatchError, BatchKind, BatchSelection, Normalization, NormalizationStatus
 
 CANDIDATE_VERSION = "b03-candidate-1"
+FORMAL_VERSION = "b03-formal-1"
 MAX_NUMBER_LENGTH = 80
 MAX_ORIGINAL_LENGTH = 256
 NO_BATCH_KEY = "-"
@@ -19,7 +20,10 @@ class NormalizationPolicy:
     max_length: int
 
 
-POLICIES = {CANDIDATE_VERSION: NormalizationPolicy(CANDIDATE_VERSION, MAX_NUMBER_LENGTH)}
+# The approved version shares the candidate's strict identity semantics.
+# Historical rows continue to decode using their recorded version.
+POLICIES = {version: NormalizationPolicy(version, MAX_NUMBER_LENGTH)
+            for version in (CANDIDATE_VERSION, FORMAL_VERSION)}
 
 
 def reserved_name(value):
@@ -29,7 +33,7 @@ def reserved_name(value):
     return normalize("NFKC", value).strip().casefold().startswith(("hp-nb-", "hp-rb-"))
 
 
-def normalize_selection(selection: object, *, policy_version: str = CANDIDATE_VERSION) -> BatchSelection:
+def normalize_selection(selection: object, *, policy_version: str = FORMAL_VERSION) -> BatchSelection:
     policy = POLICIES.get(policy_version)
     if policy is None:
         raise BatchError("BATCH_POLICY_UNAVAILABLE")

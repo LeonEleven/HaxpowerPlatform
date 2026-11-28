@@ -57,7 +57,7 @@ def seed():
     for suffix in ("A", "B"):
         code = f"{PREFIX}-{suffix}"
         brand = sku.save_brand(BrandData(code=code, display_name=f"合成 Synthetic Brand {suffix}"))
-        result = sku.create_sku(
+        result = getattr(sku, "create_fixture_sku", sku.create_sku)(
             SKUData(code=code, specification=spec.id, brand=brand.id, display_name="合成 Synthetic valve",
                     stock_uom=uom, quantity_precision=3),
             identifiers=[Identifier(kind="OEM", value=f"{PREFIX}-SHARED")],
@@ -109,7 +109,7 @@ def verify_concurrency(site):
                 connection, = frappe.db.sql("SELECT CONNECTION_ID()")[0]
                 ready.wait()
                 try:
-                    result = sku.create_sku(replace(template.data, code=code), existing_item=native)
+                    result = getattr(sku, "create_fixture_sku", sku.create_sku)(replace(template.data, code=code), existing_item=native)
                     frappe.db.commit()
                     return connection, result.id
                 except (frappe.ValidationError, frappe.UniqueValidationError) as error:
