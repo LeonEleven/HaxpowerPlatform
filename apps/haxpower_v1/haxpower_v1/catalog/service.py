@@ -425,9 +425,9 @@ def edit_specification(
             frappe.throw("The specification revision has changed. Reload it before editing.")
         if data.category != record.category:
             frappe.throw("The category of an existing specification is immutable.")
-        if data.code != record.code or (data.stock_uom or None) != (record.stock_uom or None):
-            frappe.throw("Specification code and stock UOM are immutable.")
         changes = _metadata(data)
+        if changes["code"] != record.code or (data.stock_uom or None) != (record.stock_uom or None):
+            frappe.throw("Specification code and stock UOM are immutable.")
         previous = _saved_values(record)
         current = previous if attributes is None else _normalize_values(record.category, attributes, previous)
         original = _data(SpecificationData, record)

@@ -56,14 +56,15 @@ def reserve_through(namespace, minimum):
 def allocate(spec=None):
     from .sku_persistence import SKU
 
-    if spec and not spec_serial(spec.code):
+    spec_code = spec.data.code if spec else None
+    if spec and not spec_serial(spec_code):
         frappe.throw("Historical specification code requires an approved disposition before creating a SKU.")
     namespace = spec.id if spec else SPEC_SEQUENCE
     current = _last_value(namespace)
     if current is None:
         frappe.throw("Catalog numbering has not been initialized for this identity. Run site migration.")
     next_value = current + 1
-    code = f"{spec.code}-{next_value:03d}" if spec else f"P{next_value:06d}"
+    code = f"{spec_code}-{next_value:03d}" if spec else f"P{next_value:06d}"
     if len(code) > 100:
         frappe.throw("Catalog number namespace is exhausted.")
     if frappe.db.get_value(SKU if spec else SPECIFICATION, {"code": code}, for_update=True):
