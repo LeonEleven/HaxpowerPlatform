@@ -1,0 +1,36 @@
+{
+  "doctype": "DocType",
+  "name": "HP V1 Migration Task",
+  "module": "HP V1",
+  "engine": "InnoDB",
+  "field_order": [
+    "source_version",
+    "dataset",
+    "current_version",
+    "state"
+  ],
+  "fields": [
+    {
+      "fieldname": "source_version",
+      "fieldtype": "Data",
+      "label": "Source Version"
+    },
+    {
+      "fieldname": "dataset",
+      "fieldtype": "Data",
+      "label": "Dataset"
+    },
+    {
+      "fieldname": "current_version",
+      "fieldtype": "Data",
+      "label": "Current Version"
+    },
+    {
+      "fieldname": "state",
+      "fieldtype": "Data",
+      "label": "State"
+    }
+  ],
+  "permissions": [],
+  "allow_rename": 0
+}

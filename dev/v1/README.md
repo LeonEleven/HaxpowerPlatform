@@ -276,3 +276,9 @@ V1-20 的多年生产规模、并发写入和导出性能仍须单独验收。
 升级 App 0.17.0 时，每次 migrate 同步 DocType 后重验规格及其 SKU 的单位、精度和编号。发现冲突时先核对原生事实并按经批准的处置恢复一致后重试。可通过 Bench 执行 `haxpower_v1.catalog.migration.legacy_maintenance_assignments` 审核旧角色。对无 SKU 的待配置规格，可用 `haxpower_v1.catalog.service.configure_pending_specification_unit` 传规格 ID、单位和当前版本。非正式编码旧规格的新增正式 SKU 待人工核定身份处置。持续记录签发后的一致备份，恢复到旧存档前应确认其高水位覆盖已对外签发的编码。
 
 工程 CI 固定合并后的 V1-15 App 构造前版本站点并比较升级前后原生及业务快照。包含旧正式格式编号及待配置规格、历史原生流水、配置初始化、两连接分配、失败升级恢复、PC/SET 原生数量和实际 Cookie 权限回归。引入 `b03-formal-1` 后沿用候选版本原始映射。隔离夹具的显式编码由独立服务提供。
+
+## V1-16B 主数据迁移
+
+合成主数据生成、私有文件、分页预览、审核、建档及增量命令见 [主数据迁移契约](../../docs/V1-16B-MASTER-DATA-MIGRATION.md#合成演示)。生成文件写入 Git 忽略的 `dev/v1/data/`。
+
+V1 engineering 保留历史升级验证，并新增以合并后的 V1-16A（0.17.0）为起点的 V1-16B 升级、失败注入、私有源文件恢复和迁移前后库存逐事实核对。

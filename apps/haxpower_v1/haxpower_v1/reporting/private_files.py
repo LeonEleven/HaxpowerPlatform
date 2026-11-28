@@ -17,6 +17,7 @@ MAX_SIZE = 10 * 1024 * 1024
 class Area(StrEnum):
     EXPORTS = "exports"
     ATTACHMENTS = "attachments"
+    MIGRATION = "migration"
 
 
 def directory(area=Area.EXPORTS):
@@ -32,14 +33,14 @@ def directory(area=Area.EXPORTS):
     return path
 
 
-def filename(identity):
+def filename(identity, *, area=Area.EXPORTS):
     from ..access.policy import _record_id
 
-    return directory() / (_record_id(identity) + ".xlsx")
+    return directory(area) / (_record_id(identity) + ".xlsx")
 
 
-def store(identity, write):
-    path = filename(identity)
+def store(identity, write, *, area=Area.EXPORTS):
+    path = filename(identity, area=area)
     descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".generating-")
     try:
         with os.fdopen(descriptor, "w+b") as stream:
@@ -62,11 +63,11 @@ def store(identity, write):
         Path(temporary).unlink(missing_ok=True)
 
 
-def read(identity, expected_size, checksum):
+def read(identity, expected_size, checksum, *, area=Area.EXPORTS):
     if not 0 < expected_size <= MAX_SIZE:
         raise StockError("PRIVATE_FILE_UNAVAILABLE")
     try:
-        descriptor = os.open(filename(identity), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        descriptor = os.open(filename(identity, area=area), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         with os.fdopen(descriptor, "rb") as stream:
             status = os.fstat(stream.fileno())
             if not S_ISREG(status.st_mode) or status.st_size != expected_size:

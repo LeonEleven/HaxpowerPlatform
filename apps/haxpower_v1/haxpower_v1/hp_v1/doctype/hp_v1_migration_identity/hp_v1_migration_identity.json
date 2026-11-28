@@ -1,0 +1,66 @@
+{
+  "doctype": "DocType",
+  "name": "HP V1 Migration Identity",
+  "module": "HP V1",
+  "engine": "InnoDB",
+  "field_order": [
+    "source_system",
+    "source_namespace",
+    "entity_type",
+    "source_id",
+    "target_id",
+    "first_version",
+    "latest_version",
+    "source_digest",
+    "evidence"
+  ],
+  "fields": [
+    {
+      "fieldname": "source_system",
+      "fieldtype": "Data",
+      "label": "Source System"
+    },
+    {
+      "fieldname": "source_namespace",
+      "fieldtype": "Small Text",
+      "label": "Source Namespace"
+    },
+    {
+      "fieldname": "entity_type",
+      "fieldtype": "Data",
+      "label": "Entity Type"
+    },
+    {
+      "fieldname": "source_id",
+      "fieldtype": "Small Text",
+      "label": "Source Id"
+    },
+    {
+      "fieldname": "target_id",
+      "fieldtype": "Data",
+      "label": "Target Id"
+    },
+    {
+      "fieldname": "first_version",
+      "fieldtype": "Data",
+      "label": "First Version"
+    },
+    {
+      "fieldname": "latest_version",
+      "fieldtype": "Data",
+      "label": "Latest Version"
+    },
+    {
+      "fieldname": "source_digest",
+      "fieldtype": "Data",
+      "label": "Source Digest"
+    },
+    {
+      "fieldname": "evidence",
+      "fieldtype": "Long Text",
+      "label": "Evidence"
+    }
+  ],
+  "permissions": [],
+  "allow_rename": 0
+}

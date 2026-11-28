@@ -261,3 +261,7 @@ Excel 列与相应查询的授权字段一致。状态及下载依文件生成�
 可信后端调用 `catalog.service.create_specification`，传分类、名称、库存单位和按属性 ID 提交的值集合。可传 `HistoricalIdentifier(source, value)`。编辑提交当前编码及单位和 `expected_revision`。可信后端调用 `catalog.sku.create_sku`，传规格、品牌、名称及可选标识或备注。库存单位及精度可省略或提交与规格一致的值。创建服务要求省略编码，事务成功提交后方可将返回编码视为已签发。工程夹具使用独立的隔离入口。
 
 `access.api.get_specification` 及规格投影返回 `historical_identifiers`，元素含 `source` 和 `value`。产品详情已有的 `identifiers` 继续包含获得授权的 LEGACY SKU 标识。已授权的规格字段随既有 Excel 列导出，现有文件按其生成时记录的列和筛选依赖继续检查。普通 DTO 不含内部匹配文本、Item 或系统 Batch 标识。新增维护服务仅供受控后端调用，员工 HTTP 数量写入继续关闭。
+
+## V1-16B 主数据导入
+
+App 0.18.0 提供授权同步后端服务。上传、预览、复核、批准、分组执行和受控文件读取见专门契约。 [主数据迁移契约](V1-16B-MASTER-DATA-MIGRATION.md)
