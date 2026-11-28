@@ -43,7 +43,7 @@ App 0.18.0 通过 `haxpower_v1.migration.service` 提供同步后端服务。开
 
 ## 文件与证据
 
-只接受 .xlsx OOXML 数据包。限制为每批最多 4 个文件、每个文件压缩后 4 MiB、解压后 24 MiB、最多 24 个成员、每文件 10 张表、每表 5001 行含表头、32 列、每单元格 8192 字符、每批 6500 条数据行和 800 万字符。读取器限制成员解压比，校验包成员、关系目标及内容类型，拒绝公式及缓存、宏、嵌入、外链、路径穿越、文本实体声明和超限文件。仅本地解析 XML。数字保持 Excel 序列化的原始十进制文本。Excel 写入之前已丢失的前导零须由人工从来源证据核实。
+只接受 .xlsx OOXML 数据包。限制为每批最多 4 个文件、每个文件压缩后 4 MiB、解压后 24 MiB、最多 24 个成员、每文件 10 张表、每表 5001 行含表头、32 列、每单元格 8192 字符、每批 6500 条数据行、13000 个候选组和 800 万字符。读取器限制成员解压比，校验包成员、关系目标及内容类型，拒绝公式及缓存、宏、嵌入、外链、路径穿越、文本实体声明和超限文件。仅本地解析 XML。数字保持 Excel 序列化的原始十进制文本。Excel 写入之前已丢失的前导零须由人工从来源证据核实。
 
 原文件及报告按受控 ID 写入站点私有 `private/haxpower_v1/migration`。附件元数据包含原名、大小、SHA-256、任务和来源格式。文件读取重新校验当前授权、归属与摘要。上传失败清理已创建且未登记的私有对象。详情分页返回源行、原始类型、候选、目标现状、历史来源、依赖及阻断原因。报告中的文本均以文本单元格写入。站点备份恢复须同时覆盖数据库和该私有目录。
 
@@ -68,7 +68,7 @@ App 0.18.0 通过 `haxpower_v1.migration.service` 提供同步后端服务。开
 | `upload(source, dataset, uploads, task_id=None, expected_version=None)` | 输入 `[(原文件名, bytes)]`。返回任务、版本、摘要、组数和阻断数。旧任务换文件需要当前版本。 |
 | `preview(task_id, version=None, offset=0, limit=50)` | 分页读候选、上次来源、当前目标、差异、判断、批准和结果。 |
 | `source_rows(task_id, version, offset=0, limit=50)` | 分页读各来源行及原始类型。 |
-| `revise(task_id, expected_version, decisions)` | 提交本次版本完整决定集。每项包含 `keys`、`reason`，可选 `fields`，或 `target_id`／`target_code` 加 `action`，或 `drop_rows`／`skip`。修改明确关联须核实后的 `code:` 或 `id:` 目标。纯确认适用于重复选项、已有 ID 的前缀冲突，以及确认保留缺失的可选历史属性。 |
+| `revise(task_id, expected_version, decisions)` | 提交本次版本完整决定集，展开后的决定证据上限为 200 万 ASCII JSON 字符。每项包含 `keys`、`reason`，可选 `fields`，或 `target_id`／`target_code` 加 `action`，或 `drop_rows`／`skip`。修改明确关联须核实后的 `code:` 或 `id:` 目标。纯确认适用于重复选项、已有 ID 的前缀冲突，以及确认保留缺失的可选历史属性。 |
 | `approve(task_id, version, digest, reason)` | 仅当前待审版本、无阻断且含可执行组才批准。 |
 | `execute(task_id, version, group=None, max_groups=1)` | 指定组或最多 25 个就绪组，每组各自提交，返回实际目标或代码。 |
 | `report(task_id, version)`、`download(task_id, file_id)` | 私有报告元数据，或文件名和经过校验的字节。 |

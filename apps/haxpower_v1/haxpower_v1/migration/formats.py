@@ -12,6 +12,8 @@ from . import xlsx
 STANDARD = "haxpower-master-1"
 LEGACY = "legacy-material-1"
 SOURCE_SYSTEM = {STANDARD: "haxpower-master", LEGACY: "legacy-material"}
+MAX_SOURCE_ROWS = 6500
+MAX_GROUPS = 2 * MAX_SOURCE_ROWS
 CONFIG = json.loads((Path(__file__).parent.parent / "catalog/initial_configuration.json").read_text())
 CATEGORIES = {item["code"]: item for item in CONFIG["categories"]}
 ATTRIBUTES = {item["display_name"]: item for item in CONFIG["attributes"]}
@@ -152,7 +154,7 @@ def parse(source, namespace, files):
             raise xlsx.MigrationError("WORKBOOK_SHEETS")
         candidates = _legacy(namespace, sheets)
     rows = [row for entries in sheets.values() for row in entries]
-    if (len(rows) > 6500 or not candidates or
+    if (len(rows) > MAX_SOURCE_ROWS or not candidates or len(candidates) > MAX_GROUPS or
             sum(len(cell.value or "") for row in rows for cell in row.cells.values()) > 8_000_000):
         raise xlsx.MigrationError("MIGRATION_ROW_LIMIT")
     raw = {row.key: row for row in rows}

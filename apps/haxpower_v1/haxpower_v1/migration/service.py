@@ -1,6 +1,7 @@
 """Authorized synchronous backend entry points for master data migration."""
 
 from dataclasses import asdict
+import json
 from pathlib import Path
 from time import sleep
 from uuid import uuid4
@@ -19,6 +20,7 @@ AREA = private_files.Area.MIGRATION
 MAX_GROUP_BATCH = 25
 DEADLOCK_RETRIES = 3
 MAX_PAGE = 100
+MAX_DECISION_CHARS = 2_000_000
 
 
 def _permission(operation, *, lock=False):
@@ -102,6 +104,7 @@ def _decisions(records, candidates, actor):
         raise xlsx.MigrationError("INVALID_REVIEW_DECISION")
     known = {candidate.key: candidate for candidate in candidates}
     output = {}
+    decision_size = 0
     allowed = {"keys", "reason", "skip", "target_id", "target_code", "fields", "drop_rows", "action"}
     for entry in records:
         if not isinstance(entry, dict) or set(entry) - allowed:
@@ -147,8 +150,12 @@ def _decisions(records, candidates, actor):
                         raise xlsx.MigrationError("INVALID_REVIEW_DECISION")
                 elif not isinstance(value, str) or len(value) > xlsx.MAX_CELL:
                     raise xlsx.MigrationError("INVALID_REVIEW_DECISION")
-            output[key] = {**{name: value for name, value in entry.items() if name != "keys"},
-                           "actor": actor, "at": now_datetime().isoformat(), "rows": candidate.rows}
+            result = {**{name: value for name, value in entry.items() if name != "keys"},
+                      "actor": actor, "at": now_datetime().isoformat(), "rows": candidate.rows}
+            decision_size += len(json.dumps(result, ensure_ascii=True))
+            if decision_size > MAX_DECISION_CHARS:
+                raise xlsx.MigrationError("MIGRATION_DECISION_LIMIT")
+            output[key] = result
     return output
 
 
@@ -278,7 +285,7 @@ def preview(task_id, version=None, *, offset=0, limit=50):
 
 
 def _page(offset, limit):
-    if type(offset) is not int or not 0 <= offset <= 10000 or type(limit) is not int or not 1 <= limit <= MAX_PAGE:
+    if type(offset) is not int or not 0 <= offset <= formats.MAX_GROUPS or type(limit) is not int or not 1 <= limit <= MAX_PAGE:
         raise xlsx.MigrationError("MIGRATION_PAGE_LIMIT")
 
 

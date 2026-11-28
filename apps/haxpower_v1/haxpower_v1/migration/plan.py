@@ -287,6 +287,10 @@ class Preview:
                 raise Blocked("LEGACY_PRODUCT_LINK_REQUIRES_REVIEWED_UPDATE")
             if kind not in {"Specifications", "SKUs"} and current.get("status", ACTIVE) != ACTIVE:
                 raise Blocked("INACTIVE_TARGET")
+            if kind == "Options" and entry["fields"].get("attribute"):
+                attribute, _ = self.reference(result, "Attributes", entry["fields"]["attribute"])
+                if attribute != current["attribute"]:
+                    raise Blocked("OPTION_ATTRIBUTE_CONFLICT")
             result.update(action="reference", projected=current)
             self.claims.setdefault((kind, target), result["key"])
             return
